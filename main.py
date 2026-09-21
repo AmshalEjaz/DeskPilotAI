@@ -432,7 +432,7 @@ class DeskPilotWindow(QMainWindow):
         )
 
         self.command_input.setPlaceholderText(
-            "Try: Open YouTube and search Python for beginners"
+            "Try: Open YouTube and search..."
         )
 
         self.command_input.setMinimumHeight(
