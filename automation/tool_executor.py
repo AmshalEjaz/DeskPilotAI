@@ -1,0 +1,1110 @@
+class ToolExecutor:
+
+    # =========================================================
+    # SUPPORTED TOOLS
+    # =========================================================
+
+    ALLOWED_TOOLS = {
+        "open_file_explorer",
+        "open_this_pc",
+
+        "open_app",
+
+        "open_folder",
+        "open_item",
+        "list_files",
+        "find_item",
+        "find_by_extension",
+        "find_latest_file",
+
+        "create_folder",
+        "create_file",
+        "rename_item",
+        "copy_item",
+        "move_item",
+
+        "browser_open",
+        "browser_search",
+        "browser_close",
+
+        "unknown",
+    }
+
+    # =========================================================
+    # SAFE FILE LOCATIONS
+    # =========================================================
+
+    ALLOWED_LOCATIONS = {
+        "desktop",
+        "downloads",
+        "documents",
+        "pictures",
+    }
+
+    # =========================================================
+    # SUPPORTED BROWSER SITES
+    # =========================================================
+
+    ALLOWED_BROWSER_SITES = {
+        "google",
+        "youtube",
+        "github",
+        "bing",
+        "wikipedia",
+        "duckduckgo",
+    }
+
+    # =========================================================
+    # BROWSER ALIASES
+    # =========================================================
+
+    BROWSER_ALIASES = {
+        "yt": "youtube",
+        "wiki": "wikipedia",
+        "ddg": "duckduckgo",
+    }
+
+    # =========================================================
+    # INIT
+    # =========================================================
+
+    def __init__(
+        self,
+        file_agent,
+        app_agent,
+        browser_open_callback=None,
+        browser_search_callback=None,
+        browser_close_callback=None,
+    ):
+
+        self.file_agent = file_agent
+        self.app_agent = app_agent
+
+        self.browser_open_callback = (
+            browser_open_callback
+        )
+
+        self.browser_search_callback = (
+            browser_search_callback
+        )
+
+        self.browser_close_callback = (
+            browser_close_callback
+        )
+
+    # =========================================================
+    # MAIN EXECUTOR
+    # =========================================================
+
+    def execute(
+        self,
+        plan
+    ):
+
+        # =====================================================
+        # VALIDATE PLAN
+        # =====================================================
+
+        if not isinstance(
+            plan,
+            dict
+        ):
+
+            raise ValueError(
+                "Planner output must be a dictionary."
+            )
+
+        tool = plan.get(
+            "tool"
+        )
+
+        args = plan.get(
+            "args",
+            {}
+        )
+
+        if not isinstance(
+            tool,
+            str
+        ):
+
+            raise ValueError(
+                "Planner output does not contain "
+                "a valid tool."
+            )
+
+        if not isinstance(
+            args,
+            dict
+        ):
+
+            raise ValueError(
+                "Planner args must be a dictionary."
+            )
+
+        tool = tool.strip()
+
+        if tool not in self.ALLOWED_TOOLS:
+
+            raise ValueError(
+                f"Tool '{tool}' is not allowed."
+            )
+
+        # =====================================================
+        # UNKNOWN
+        # =====================================================
+
+        if tool == "unknown":
+
+            reason = args.get(
+                "reason",
+                "I don't know how to perform "
+                "that action yet."
+            )
+
+            return self._result(
+                message=str(reason)
+            )
+
+        # =====================================================
+        # OPEN FILE EXPLORER
+        # =====================================================
+
+        if tool == "open_file_explorer":
+
+            message = (
+                self.file_agent
+                .open_file_explorer()
+            )
+
+            return self._result(
+                message=message
+            )
+
+        # =====================================================
+        # OPEN THIS PC
+        # =====================================================
+
+        if tool == "open_this_pc":
+
+            message = (
+                self.file_agent
+                .open_this_pc()
+            )
+
+            return self._result(
+                message=message
+            )
+
+        # =====================================================
+        # OPEN WINDOWS APP
+        # =====================================================
+
+        if tool == "open_app":
+
+            self._require(
+                args,
+                "app_name"
+            )
+
+            app_name = self._clean_text(
+                args["app_name"],
+                "app_name"
+            )
+
+            message = (
+                self.app_agent
+                .open_app(
+                    app_name
+                )
+            )
+
+            return self._result(
+                message=message
+            )
+
+        # =====================================================
+        # OPEN FOLDER
+        # =====================================================
+
+        if tool == "open_folder":
+
+            location = self._get_location(
+                args
+            )
+
+            message = (
+                self.file_agent
+                .open_folder(
+                    location
+                )
+            )
+
+            return self._result(
+                message=message
+            )
+
+        # =====================================================
+        # OPEN FILE / FOLDER ITEM
+        # =====================================================
+
+        if tool == "open_item":
+
+            self._require(
+                args,
+                "item_name",
+                "location"
+            )
+
+            item_name = self._clean_text(
+                args["item_name"],
+                "item_name"
+            )
+
+            location = (
+                self._validate_location(
+                    args["location"]
+                )
+            )
+
+            message = (
+                self.file_agent
+                .open_item(
+                    item_name=item_name,
+                    location=location,
+                )
+            )
+
+            return self._result(
+                message=message
+            )
+
+        # =====================================================
+        # LIST FILES
+        # =====================================================
+
+        if tool == "list_files":
+
+            location = self._get_location(
+                args
+            )
+
+            items = (
+                self.file_agent
+                .list_files(
+                    location
+                )
+            )
+
+            message = self._format_items(
+                items=items,
+                title=location.title(),
+            )
+
+            return self._result(
+                message=message,
+                data=items,
+            )
+
+        # =====================================================
+        # FIND ITEM
+        # =====================================================
+
+        if tool == "find_item":
+
+            self._require(
+                args,
+                "query",
+                "location"
+            )
+
+            query = self._clean_text(
+                args["query"],
+                "query"
+            )
+
+            location = (
+                self._validate_location(
+                    args["location"]
+                )
+            )
+
+            item_type = args.get(
+                "item_type"
+            )
+
+            if item_type is not None:
+
+                item_type = (
+                    str(item_type)
+                    .lower()
+                    .strip()
+                )
+
+                if item_type in {
+                    "",
+                    "null",
+                    "none",
+                    "any",
+                }:
+
+                    item_type = None
+
+                elif item_type not in {
+                    "file",
+                    "folder",
+                }:
+
+                    raise ValueError(
+                        "item_type must be "
+                        "'file', 'folder' or null."
+                    )
+
+            results = (
+                self.file_agent
+                .find_item(
+                    query=query,
+                    location=location,
+                    item_type=item_type,
+                )
+            )
+
+            if not results:
+
+                message = (
+                    f"No matching item found for "
+                    f"'{query}' in "
+                    f"{location.title()}."
+                )
+
+            else:
+
+                message = self._format_items(
+                    items=results,
+                    title=(
+                        f"Search results for "
+                        f"'{query}'"
+                    ),
+                )
+
+            return self._result(
+                message=message,
+                data=results,
+            )
+
+        # =====================================================
+        # FIND FILES BY EXTENSION
+        # =====================================================
+
+        if tool == "find_by_extension":
+
+            self._require(
+                args,
+                "extension",
+                "location"
+            )
+
+            extension = self._clean_text(
+                args["extension"],
+                "extension"
+            )
+
+            location = (
+                self._validate_location(
+                    args["location"]
+                )
+            )
+
+            results = (
+                self.file_agent
+                .find_by_extension(
+                    extension=extension,
+                    location=location,
+                )
+            )
+
+            if not results:
+
+                message = (
+                    f"No {extension} files found "
+                    f"in {location.title()}."
+                )
+
+            else:
+
+                message = self._format_items(
+                    items=results,
+                    title=(
+                        f"{extension} files in "
+                        f"{location.title()}"
+                    ),
+                )
+
+            return self._result(
+                message=message,
+                data=results,
+            )
+
+        # =====================================================
+        # FIND LATEST FILE
+        # =====================================================
+
+        if tool == "find_latest_file":
+
+            location = self._get_location(
+                args
+            )
+
+            extension = args.get(
+                "extension"
+            )
+
+            if extension is not None:
+
+                extension = (
+                    str(extension)
+                    .strip()
+                )
+
+                if extension.lower() in {
+                    "",
+                    "null",
+                    "none",
+                    "any",
+                }:
+
+                    extension = None
+
+            result = (
+                self.file_agent
+                .find_latest_file(
+                    location=location,
+                    extension=extension,
+                )
+            )
+
+            if result is None:
+
+                message = (
+                    f"No matching file found "
+                    f"in {location.title()}."
+                )
+
+            else:
+
+                message = (
+                    "Latest file found:\n"
+                    f"{result['name']}\n"
+                    f"{result['path']}"
+                )
+
+            return self._result(
+                message=message,
+                data=result,
+            )
+
+        # =====================================================
+        # CREATE FOLDER
+        # =====================================================
+
+        if tool == "create_folder":
+
+            self._require(
+                args,
+                "folder_name",
+                "location"
+            )
+
+            folder_name = self._clean_text(
+                args["folder_name"],
+                "folder_name"
+            )
+
+            location = (
+                self._validate_location(
+                    args["location"]
+                )
+            )
+
+            message = (
+                self.file_agent
+                .create_folder(
+                    folder_name=folder_name,
+                    location=location,
+                )
+            )
+
+            return self._result(
+                message=message
+            )
+
+        # =====================================================
+        # CREATE FILE
+        # =====================================================
+
+        if tool == "create_file":
+
+            self._require(
+                args,
+                "file_name",
+                "location"
+            )
+
+            file_name = self._clean_text(
+                args["file_name"],
+                "file_name"
+            )
+
+            location = (
+                self._validate_location(
+                    args["location"]
+                )
+            )
+
+            content = args.get(
+                "content",
+                ""
+            )
+
+            if content is None:
+                content = ""
+
+            content = str(
+                content
+            )
+
+            message = (
+                self.file_agent
+                .create_file(
+                    file_name=file_name,
+                    location=location,
+                    content=content,
+                )
+            )
+
+            return self._result(
+                message=message
+            )
+
+        # =====================================================
+        # RENAME ITEM
+        # =====================================================
+
+        if tool == "rename_item":
+
+            self._require(
+                args,
+                "old_name",
+                "new_name",
+                "location"
+            )
+
+            old_name = self._clean_text(
+                args["old_name"],
+                "old_name"
+            )
+
+            new_name = self._clean_text(
+                args["new_name"],
+                "new_name"
+            )
+
+            location = (
+                self._validate_location(
+                    args["location"]
+                )
+            )
+
+            message = (
+                self.file_agent
+                .rename_item(
+                    old_name=old_name,
+                    new_name=new_name,
+                    location=location,
+                )
+            )
+
+            return self._result(
+                message=message
+            )
+
+        # =====================================================
+        # COPY ITEM
+        # =====================================================
+
+        if tool == "copy_item":
+
+            self._require(
+                args,
+                "item_name",
+                "source_location",
+                "destination_location"
+            )
+
+            item_name = self._clean_text(
+                args["item_name"],
+                "item_name"
+            )
+
+            source = (
+                self._validate_location(
+                    args["source_location"]
+                )
+            )
+
+            destination = (
+                self._validate_location(
+                    args[
+                        "destination_location"
+                    ]
+                )
+            )
+
+            message = (
+                self.file_agent
+                .copy_item(
+                    item_name=item_name,
+                    source_location=source,
+                    destination_location=destination,
+                )
+            )
+
+            return self._result(
+                message=message
+            )
+
+        # =====================================================
+        # MOVE ITEM
+        # =====================================================
+
+        if tool == "move_item":
+
+            self._require(
+                args,
+                "item_name",
+                "source_location",
+                "destination_location"
+            )
+
+            item_name = self._clean_text(
+                args["item_name"],
+                "item_name"
+            )
+
+            source = (
+                self._validate_location(
+                    args["source_location"]
+                )
+            )
+
+            destination = (
+                self._validate_location(
+                    args[
+                        "destination_location"
+                    ]
+                )
+            )
+
+            message = (
+                self.file_agent
+                .move_item(
+                    item_name=item_name,
+                    source_location=source,
+                    destination_location=destination,
+                )
+            )
+
+            return self._result(
+                message=message
+            )
+
+        # =====================================================
+        # BROWSER OPEN
+        # =====================================================
+
+        if tool == "browser_open":
+
+            self._require(
+                args,
+                "site"
+            )
+
+            site = self._validate_site(
+                args["site"]
+            )
+
+            if (
+                self.browser_open_callback
+                is None
+            ):
+
+                raise RuntimeError(
+                    "Browser open callback "
+                    "is not configured."
+                )
+
+            self.browser_open_callback(
+                site
+            )
+
+            return self._result(
+                message=None,
+                asynchronous=True,
+            )
+
+        # =====================================================
+        # BROWSER SEARCH
+        # =====================================================
+
+        if tool == "browser_search":
+
+            self._require(
+                args,
+                "site",
+                "query"
+            )
+
+            site = self._validate_site(
+                args["site"]
+            )
+
+            query = self._clean_text(
+                args["query"],
+                "query"
+            )
+
+            if (
+                self.browser_search_callback
+                is None
+            ):
+
+                raise RuntimeError(
+                    "Browser search callback "
+                    "is not configured."
+                )
+
+            self.browser_search_callback(
+                site,
+                query
+            )
+
+            return self._result(
+                message=None,
+                asynchronous=True,
+            )
+
+        # =====================================================
+        # BROWSER CLOSE
+        # =====================================================
+
+        if tool == "browser_close":
+
+            self._require(
+                args,
+                "site"
+            )
+
+            site = self._validate_site(
+                args["site"]
+            )
+
+            if (
+                self.browser_close_callback
+                is None
+            ):
+
+                raise RuntimeError(
+                    "Browser close callback "
+                    "is not configured."
+                )
+
+            self.browser_close_callback(
+                site
+            )
+
+            return self._result(
+                message=None,
+                asynchronous=True,
+            )
+
+        # =====================================================
+        # FALLBACK
+        # =====================================================
+
+        raise RuntimeError(
+            f"Tool '{tool}' could not be executed."
+        )
+
+    # =========================================================
+    # RESULT FORMAT
+    # =========================================================
+
+    def _result(
+        self,
+        message=None,
+        data=None,
+        asynchronous=False,
+    ):
+
+        return {
+            "success": True,
+            "message": message,
+            "data": data,
+            "asynchronous": asynchronous,
+        }
+
+    # =========================================================
+    # REQUIRED ARGUMENT CHECK
+    # =========================================================
+
+    def _require(
+        self,
+        args,
+        *names
+    ):
+
+        missing = []
+
+        for name in names:
+
+            if name not in args:
+
+                missing.append(
+                    name
+                )
+
+                continue
+
+            value = args.get(
+                name
+            )
+
+            if value is None:
+
+                missing.append(
+                    name
+                )
+
+                continue
+
+            if (
+                isinstance(
+                    value,
+                    str
+                )
+                and
+                not value.strip()
+            ):
+
+                missing.append(
+                    name
+                )
+
+        if missing:
+
+            raise ValueError(
+                "Missing required argument(s): "
+                + ", ".join(
+                    missing
+                )
+            )
+
+    # =========================================================
+    # CLEAN TEXT
+    # =========================================================
+
+    def _clean_text(
+        self,
+        value,
+        name
+    ):
+
+        if value is None:
+
+            raise ValueError(
+                f"{name} is required."
+            )
+
+        value = str(
+            value
+        ).strip()
+
+        if not value:
+
+            raise ValueError(
+                f"{name} cannot be empty."
+            )
+
+        return value
+
+    # =========================================================
+    # GET LOCATION
+    # =========================================================
+
+    def _get_location(
+        self,
+        args
+    ):
+
+        self._require(
+            args,
+            "location"
+        )
+
+        return self._validate_location(
+            args["location"]
+        )
+
+    # =========================================================
+    # VALIDATE LOCATION
+    # =========================================================
+
+    def _validate_location(
+        self,
+        location
+    ):
+
+        location = self._clean_text(
+            location,
+            "location"
+        )
+
+        aliases = {
+            "desktop": "desktop",
+
+            "download": "downloads",
+            "downloads": "downloads",
+
+            "document": "documents",
+            "documents": "documents",
+
+            "picture": "pictures",
+            "pictures": "pictures",
+
+            "photo": "pictures",
+            "photos": "pictures",
+        }
+
+        normalized = aliases.get(
+            location.lower(),
+            location.lower()
+        )
+
+        if (
+            normalized
+            not in
+            self.ALLOWED_LOCATIONS
+        ):
+
+            raise ValueError(
+                f"Location '{location}' "
+                f"is not currently allowed."
+            )
+
+        return normalized
+
+    # =========================================================
+    # VALIDATE BROWSER SITE
+    # =========================================================
+
+    def _validate_site(
+        self,
+        site
+    ):
+
+        site = (
+            self._clean_text(
+                site,
+                "site"
+            )
+            .lower()
+        )
+
+        site = self.BROWSER_ALIASES.get(
+            site,
+            site
+        )
+
+        if (
+            site
+            not in
+            self.ALLOWED_BROWSER_SITES
+        ):
+
+            raise ValueError(
+                f"Browser site '{site}' "
+                f"is not currently supported."
+            )
+
+        return site
+
+    # =========================================================
+    # FORMAT FILE RESULTS
+    # =========================================================
+
+    def _format_items(
+        self,
+        items,
+        title=None,
+        limit=30,
+    ):
+
+        if not items:
+
+            if title:
+
+                return (
+                    f"No items found in {title}."
+                )
+
+            return "No items found."
+
+        lines = []
+
+        if title:
+
+            lines.append(
+                title
+            )
+
+        for item in items[:limit]:
+
+            item_type = item.get(
+                "type",
+                "Item"
+            )
+
+            name = item.get(
+                "name",
+                "Unknown"
+            )
+
+            path = item.get(
+                "path"
+            )
+
+            if path:
+
+                lines.append(
+                    f"{item_type}: "
+                    f"{name}\n"
+                    f"{path}"
+                )
+
+            else:
+
+                lines.append(
+                    f"{item_type}: "
+                    f"{name}"
+                )
+
+        if len(items) > limit:
+
+            lines.append(
+                f"... and "
+                f"{len(items) - limit} more."
+            )
+
+        return "\n".join(
+            lines
+        )
