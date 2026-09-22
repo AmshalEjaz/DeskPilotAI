@@ -17,7 +17,9 @@ class PlannerAgent:
         "open_this_pc",
         "open_app",
         "close_app",
+        "close_window",
         "get_app_info",
+        "check_app_status",
         "count_images",
 
         "open_folder",
@@ -237,6 +239,67 @@ Args:
 }
 
 Use for installed Windows applications.
+
+
+4. close_window
+
+Args:
+
+{
+    "target": "file, folder, or visible window name"
+}
+
+Use this when the user wants to close a FILE, FOLDER, image, document,
+or any visible desktop window that is not necessarily an application.
+Windows closes the host window (Explorer, Notepad, Photos, etc.).
+
+Examples:
+
+"close pictures folder"
+"close the Pictures window"
+"close grav.txt"
+"close grav.txt from desktop"
+"close this image"
+
+Output:
+
+{
+    "tool": "close_window",
+    "args": {
+        "target": "Pictures"
+    }
+}
+
+For "close chrome", "close instagram", etc. use close_app instead.
+
+
+5. check_app_status
+
+Args:
+
+{
+    "app_name": "application name"
+}
+
+Use when the user asks whether an application is currently open/running,
+or asks why an application is not open yet. Check the actual Windows
+process state; do not invent a reason for failure.
+
+Examples:
+
+"is wamp running"
+"is wampp open"
+"why wamp not open yet"
+"check chrome status"
+
+Output:
+
+{
+    "tool": "check_app_status",
+    "args": {
+        "app_name": "WAMP"
+    }
+}
 
 Examples:
 

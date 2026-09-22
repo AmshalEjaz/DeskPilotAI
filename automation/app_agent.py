@@ -28,6 +28,10 @@ class AppAgent:
         "edge": "microsoft edge",
 
         "whatsapp desktop": "whatsapp",
+
+        "wampp": "wamp",
+        "wampserver": "wamp",
+        "wamp server": "wamp",
     }
 
     # =========================================================
@@ -76,6 +80,13 @@ class AppAgent:
         "microsoft edge": [
             "msedge.exe",
             "msedge",
+        ],
+
+        "wamp": [
+            "wampmanager.exe",
+            "wampmanager",
+            r"C:\wamp64\wampmanager.exe",
+            r"C:\wamp\wampmanager.exe",
         ],
     }
 
@@ -468,6 +479,10 @@ class AppAgent:
             return None
 
         for executable in candidates:
+
+            candidate_path = Path(executable)
+            if candidate_path.is_file():
+                return str(candidate_path.resolve())
 
             path = shutil.which(
                 executable
@@ -1102,7 +1117,137 @@ class AppAgent:
                 requested_name
             )
         )
-            # =========================================================
+    
+        # =====================================================
+        # WINDOWS SETTINGS
+        # =====================================================
+
+        if normalized_name in {
+            "settings",
+            "windows settings",
+        }:
+
+            os.startfile(
+                "ms-settings:"
+            )
+
+            return (
+                "Windows Settings opened successfully."
+            )
+
+        # =====================================================
+        # KNOWN EXECUTABLE
+        # =====================================================
+
+        if self._open_known_executable(
+            normalized_name
+        ):
+
+            return (
+                f"{requested_name} "
+                f"opened successfully."
+            )
+
+        # =====================================================
+        # WINDOWS START APP
+        # =====================================================
+
+        installed_app = self.find_app(
+            normalized_name
+        )
+
+        if installed_app:
+
+            display_name = installed_app[
+                "name"
+            ]
+
+            app_id = installed_app[
+                "app_id"
+            ]
+
+            try:
+
+                subprocess.Popen(
+                    [
+                        "explorer.exe",
+                        (
+                            "shell:AppsFolder\\"
+                            + app_id
+                        ),
+                    ]
+                )
+
+            except OSError as error:
+
+                raise RuntimeError(
+                    f"Could not open "
+                    f"{display_name}."
+                ) from error
+
+            return (
+                f"{display_name} "
+                f"opened successfully."
+            )
+
+        # =====================================================
+        # START MENU SHORTCUT FALLBACK
+        # =====================================================
+
+        shortcut = (
+            self._find_start_menu_shortcut(
+                normalized_name
+            )
+        )
+
+        if shortcut:
+
+            try:
+
+                os.startfile(
+                    str(shortcut)
+                )
+
+            except OSError as error:
+
+                raise RuntimeError(
+                    f"Could not open "
+                    f"{requested_name}."
+                ) from error
+
+            return (
+                f"{requested_name} "
+                f"opened successfully."
+            )
+
+        # =====================================================
+        # NOT FOUND
+        # =====================================================
+
+        suggestions = self.search_apps(
+            normalized_name,
+            limit=5
+        )
+
+        if suggestions:
+
+            names = ", ".join(
+                app["name"]
+                for app in suggestions
+            )
+
+            raise FileNotFoundError(
+                f"Could not find an exact app "
+                f"named '{requested_name}'. "
+                f"Possible matches: {names}"
+            )
+
+        raise FileNotFoundError(
+            f"App '{requested_name}' "
+            f"was not found on this computer."
+        )
+
+    # =========================================================
     # RUNNING APP PROCESS ALIASES
     # =========================================================
 
@@ -1146,6 +1291,11 @@ class AppAgent:
 
         "edge": [
             "msedge",
+        ],
+
+        "wamp": [
+            "wampmanager",
+            "wamp64manager",
         ],
 
         "visual studio code": [
@@ -1193,6 +1343,123 @@ class AppAgent:
             return []
 
         return data
+
+    # =========================================================
+    # CHECK WHETHER AN APP IS CURRENTLY RUNNING
+    # =========================================================
+
+    def check_app_status(
+        self,
+        app_name
+    ):
+
+        requested_name = str(app_name).strip()
+        if not requested_name:
+            raise ValueError("App name cannot be empty.")
+
+        normalized_name = self.normalize_app_name(requested_name)
+        running_apps = self._get_running_apps()
+        aliases = self.PROCESS_ALIASES.get(normalized_name, [])
+        matches = []
+
+        for process in running_apps:
+            process_name = self._normalize(process.get("ProcessName", ""))
+            window_title = self._normalize(process.get("MainWindowTitle", ""))
+
+            alias_match = any(
+                self._normalize(alias) == process_name
+                for alias in aliases
+            )
+            process_match = (
+                normalized_name == process_name
+                or normalized_name in process_name
+                or process_name in normalized_name
+            )
+            title_match = bool(
+                normalized_name and normalized_name in window_title
+            )
+
+            if alias_match or process_match or title_match:
+                matches.append(process)
+
+        installed = False
+        try:
+            installed = bool(self.get_app_info(requested_name).get("found"))
+        except Exception:
+            installed = False
+
+        return {
+            "requested_name": requested_name,
+            "name": normalized_name,
+            "running": bool(matches),
+            "installed": installed,
+            "process_names": sorted({
+                str(item.get("ProcessName", ""))
+                for item in matches
+                if item.get("ProcessName")
+            }),
+            "processes": matches,
+        }
+
+    # =========================================================
+    # CLOSE WINDOW BY TITLE / FILE / FOLDER NAME
+    # =========================================================
+
+    def close_window(self, target):
+        """Close a visible Windows window whose title contains target.
+
+        This is intentionally separate from close_app because folders and
+        documents are owned by their host applications (Explorer, Notepad,
+        Photos, etc.) rather than being standalone processes.
+        """
+        requested = str(target or "").strip()
+        if not requested:
+            raise ValueError("Window, file, or folder name is required.")
+
+        normalized = self._normalize(requested)
+        if not normalized:
+            raise ValueError("Window, file, or folder name is required.")
+
+        windows = self._get_running_apps()
+        matches = []
+
+        for window in windows:
+            title = str(window.get("MainWindowTitle") or "").strip()
+            if not title:
+                continue
+            normalized_title = self._normalize(title)
+            if normalized in normalized_title:
+                matches.append(window)
+
+        if not matches:
+            raise RuntimeError(
+                f"I could not find an open window for '{requested}'."
+            )
+
+        closed = 0
+        for window in matches:
+            process_id = window.get("Id")
+            if not process_id:
+                continue
+
+            command = (
+                f"$p = Get-Process -Id {int(process_id)} "
+                f"-ErrorAction SilentlyContinue; "
+                "if ($p) { $result = $p.CloseMainWindow(); $result }"
+            )
+            try:
+                output = self._run_powershell(command, timeout=10)
+                if output and output.strip().lower() == "true":
+                    closed += 1
+            except Exception:
+                continue
+
+        if closed == 0:
+            raise RuntimeError(
+                f"I found '{requested}', but Windows did not allow the window to close."
+            )
+
+        return f"'{requested}' closed successfully."
 
     # =========================================================
     # CLOSE INSTALLED / DESKTOP APP
@@ -1339,131 +1606,3 @@ class AppAgent:
             f"{requested_name} close request sent successfully."
         )
 
-        # =====================================================
-        # WINDOWS SETTINGS
-        # =====================================================
-
-        if normalized_name in {
-            "settings",
-            "windows settings",
-        }:
-
-            os.startfile(
-                "ms-settings:"
-            )
-
-            return (
-                "Windows Settings opened successfully."
-            )
-
-        # =====================================================
-        # KNOWN EXECUTABLE
-        # =====================================================
-
-        if self._open_known_executable(
-            normalized_name
-        ):
-
-            return (
-                f"{requested_name} "
-                f"opened successfully."
-            )
-
-        # =====================================================
-        # WINDOWS START APP
-        # =====================================================
-
-        installed_app = self.find_app(
-            normalized_name
-        )
-
-        if installed_app:
-
-            display_name = installed_app[
-                "name"
-            ]
-
-            app_id = installed_app[
-                "app_id"
-            ]
-
-            try:
-
-                subprocess.Popen(
-                    [
-                        "explorer.exe",
-                        (
-                            "shell:AppsFolder\\"
-                            + app_id
-                        ),
-                    ]
-                )
-
-            except OSError as error:
-
-                raise RuntimeError(
-                    f"Could not open "
-                    f"{display_name}."
-                ) from error
-
-            return (
-                f"{display_name} "
-                f"opened successfully."
-            )
-
-        # =====================================================
-        # START MENU SHORTCUT FALLBACK
-        # =====================================================
-
-        shortcut = (
-            self._find_start_menu_shortcut(
-                normalized_name
-            )
-        )
-
-        if shortcut:
-
-            try:
-
-                os.startfile(
-                    str(shortcut)
-                )
-
-            except OSError as error:
-
-                raise RuntimeError(
-                    f"Could not open "
-                    f"{requested_name}."
-                ) from error
-
-            return (
-                f"{requested_name} "
-                f"opened successfully."
-            )
-
-        # =====================================================
-        # NOT FOUND
-        # =====================================================
-
-        suggestions = self.search_apps(
-            normalized_name,
-            limit=5
-        )
-
-        if suggestions:
-
-            names = ", ".join(
-                app["name"]
-                for app in suggestions
-            )
-
-            raise FileNotFoundError(
-                f"Could not find an exact app "
-                f"named '{requested_name}'. "
-                f"Possible matches: {names}"
-            )
-
-        raise FileNotFoundError(
-            f"App '{requested_name}' "
-            f"was not found on this computer."
-        )

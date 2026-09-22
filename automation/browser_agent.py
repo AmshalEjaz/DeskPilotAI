@@ -355,81 +355,31 @@ class BrowserAgent:
     ):
 
         def status(message):
-
             if status_callback:
                 status_callback(message)
 
-        site, _ = (
-            self.get_site_config(site)
-        )
+        site, _ = self.get_site_config(site)
 
-        # Nothing usable is currently open
         if not self.session_is_usable():
-
-            status(
-                f"{site.title()} is not currently open."
-            )
-
+            status(f"{site.title()} is not currently open.")
             return
 
-        current_url = (
-            self.page.url
-            .lower()
-        )
+        current_url = self.page.url.lower()
+        expected_domain = self.SITE_DOMAINS.get(site)
 
-        expected_domain = (
-            self.SITE_DOMAINS.get(site)
-        )
-
-        # Prevent closing wrong site
-        if (
-            expected_domain
-            and expected_domain not in current_url
-        ):
-
-            status(
-                f"{site.title()} is not the "
-                f"currently active website."
-            )
-
+        if expected_domain and expected_domain not in current_url:
+            status(f"{site.title()} is not the currently active website.")
             return
 
-        status(
-            f"Closing {site.title()}..."
-        )
+        status(f"Closing {site.title()}...")
 
-        try:
+        # The browser is a dedicated automation window. Closing only the
+        # Playwright page leaves a blank Chromium tab behind. Close the
+        # whole browser session instead so the user sees the window actually
+        # disappear. The next browser command will create a fresh session.
+        self.close()
 
-            self.page.close()
-
-        except Exception:
-
-            self.page = None
-
-        # Keep Chromium alive.
-        # Create a new blank tab after closing the website.
-        if (
-            self.browser is not None
-            and self.browser.is_connected()
-            and self.context is not None
-        ):
-
-            self.page = (
-                self.context
-                .new_page()
-            )
-
-            self.page.goto(
-                "about:blank"
-            )
-
-        else:
-
-            self.page = None
-
-        status(
-            f"{site.title()} closed successfully."
-        )
+        status(f"{site.title()} closed successfully.")
 
     # =========================================================
     # CLEANUP COMPLETE BROWSER

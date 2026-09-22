@@ -760,6 +760,8 @@ class DeskPilotWindow(QMainWindow):
         # STEP 3: EXECUTE PLANNER RESULT
         # =====================================================
 
+        self.show_working_state(plan)
+
         try:
 
             result = (
@@ -806,14 +808,14 @@ class DeskPilotWindow(QMainWindow):
             asynchronous = False
 
         if message:
-
-            self.add_agent_message(
-                message
+            self.add_agent_result(
+                message=message,
+                data=result.get("data") if isinstance(result, dict) else None,
+                tool=plan.get("tool", ""),
             )
 
         # Browser worker will set Ready when finished
         if not asynchronous:
-
             self.set_status_ready()
 
     
@@ -1780,71 +1782,140 @@ class DeskPilotWindow(QMainWindow):
 
     
     # ACTIVITY LOG
-    
 
-    def add_user_message(
-        self,
-        message
-    ):
+    def _activity_palette(self):
+        if self.dark_mode:
+            return {
+                "user_bg": "#172033",
+                "user_border": "#334155",
+                "agent_bg": "#17152a",
+                "agent_border": "#5b3aa6",
+                "working_bg": "#17202b",
+                "working_border": "#3b82f6",
+                "text": "#e5e7eb",
+                "muted": "#94a3b8",
+                "accent": "#a78bfa",
+                "success": "#4ade80",
+            }
+        return {
+            "user_bg": "#fff7fb",
+            "user_border": "#f3c8da",
+            "agent_bg": "#faf5ff",
+            "agent_border": "#ddd6fe",
+            "working_bg": "#eff6ff",
+            "working_border": "#bfdbfe",
+            "text": "#3f2935",
+            "muted": "#8c6377",
+            "accent": "#7c3aed",
+            "success": "#15803d",
+        }
 
-        safe_message = html.escape(
-            message
-        )
+    def _append_activity_card(self, label, message, kind="agent", icon="✦"):
+        palette = self._activity_palette()
+        if kind == "user":
+            bg, border, label_color, icon_text = palette["user_bg"], palette["user_border"], palette["text"], "👤"
+        elif kind == "working":
+            bg, border, label_color, icon_text = palette["working_bg"], palette["working_border"], palette["accent"], icon
+        else:
+            bg, border, label_color, icon_text = palette["agent_bg"], palette["agent_border"], palette["accent"], icon
 
-        self.activity_log.append(
-            f"""
-            <div style="
-                margin-top:8px;
-                margin-bottom:14px;
-            ">
-                <b>You</b>
-                <br>
-                {safe_message}
-            </div>
-            """
-        )
-
-    def add_agent_message(
-        self,
-        message
-    ):
-
-        safe_message = html.escape(
-            message
-        )
-
-        self.activity_log.append(
-            f"""
-            <div style="
-                margin-top:8px;
-                margin-bottom:14px;
-            ">
-                <b>DeskPilot</b>
-                <br>
-                {safe_message}
-            </div>
-            """
-        )
-
-    def add_agent_html(
-        self,
-        content
-    ):
+        safe_label = html.escape(str(label))
+        safe_message = html.escape(str(message)).replace("\n", "<br>")
 
         self.activity_log.append(
-            f"""
-            <div style="
-                margin-top:8px;
-                margin-bottom:14px;
-            ">
-                <b>DeskPilot</b>
-                <br>
-                {content}
-            </div>
-            """
+            f'''<div style="margin:8px 2px 12px 2px; padding:12px 14px; background:{bg}; border:1px solid {border}; border-radius:12px;">
+                <div style="font-weight:700; color:{label_color}; margin-bottom:6px;">{icon_text}&nbsp;&nbsp;{safe_label}</div>
+                <div style="color:{palette['text']}; line-height:1.55;">{safe_message}</div>
+            </div>'''
+        )
+        self.activity_log.verticalScrollBar().setValue(self.activity_log.verticalScrollBar().maximum())
+
+    def add_user_message(self, message):
+        self._append_activity_card("You", message, kind="user", icon="👤")
+
+    def add_agent_message(self, message):
+        self._append_activity_card("DeskPilot", message, kind="agent", icon="✦")
+
+    def add_agent_html(self, content):
+        palette = self._activity_palette()
+        self.activity_log.append(
+            f'''<div style="margin:8px 2px 12px 2px; padding:12px 14px; background:{palette['agent_bg']}; border:1px solid {palette['agent_border']}; border-radius:12px;">
+                <div style="font-weight:700; color:{palette['accent']}; margin-bottom:6px;">✦&nbsp;&nbsp;DeskPilot</div>
+                <div style="color:{palette['text']}; line-height:1.55;">{content}</div>
+            </div>'''
         )
 
-    
+    def show_working_state(self, plan):
+        tool = str(plan.get("tool", "")).lower()
+        args = plan.get("args") or {}
+
+        if tool in {"find_item", "find_by_extension", "find_latest_file"}:
+            query = args.get("query") or args.get("extension") or "files"
+            location = args.get("location") or "computer"
+            self.status_label.setText("●  Searching")
+            self._append_activity_card(
+                "DeskPilot • Working",
+                f"🔎 Searching for {query} in {location}...",
+                kind="working",
+                icon="⏳",
+            )
+        elif tool == "count_images":
+            location = args.get("location") or "pictures"
+            self.status_label.setText("●  Counting")
+            self._append_activity_card(
+                "DeskPilot • Working",
+                f"🔢 Counting images in {location}...",
+                kind="working",
+                icon="⏳",
+            )
+        else:
+            self.status_label.setText("●  Working")
+            self._append_activity_card(
+                "DeskPilot • Working",
+                "⚙️ Executing your command...",
+                kind="working",
+                icon="⏳",
+            )
+
+    def add_agent_result(self, message, data=None, tool=""):
+        if isinstance(data, list) and data:
+            palette = self._activity_palette()
+            tool = str(tool).lower()
+            if tool == "find_by_extension":
+                heading = f"Found {len(data)} matching file{'s' if len(data) != 1 else ''}"
+            elif tool == "find_item":
+                heading = f"Found {len(data)} matching item{'s' if len(data) != 1 else ''}"
+            else:
+                heading = "Results"
+
+            rows = []
+            for index, item in enumerate(data[:30], start=1):
+                name = html.escape(str(item.get("name", "Unknown")))
+                path = html.escape(str(item.get("path", "")))
+                rows.append(
+                    f'''<div style="padding:8px 0; border-bottom:1px solid {palette['agent_border']};">
+                        <div style="font-weight:650; color:{palette['text']};">{index}. {name}</div>
+                        <div style="font-size:12px; color:{palette['muted']}; margin-top:3px;">{path}</div>
+                    </div>'''
+                )
+
+            extra = len(data) - 30
+            if extra > 0:
+                rows.append(f'<div style="padding-top:8px; color:{palette["muted"]};">…and {extra} more</div>')
+
+            self.activity_log.append(
+                f'''<div style="margin:8px 2px 12px 2px; padding:12px 14px; background:{palette['agent_bg']}; border:1px solid {palette['agent_border']}; border-radius:12px;">
+                    <div style="font-weight:700; color:{palette['accent']}; margin-bottom:5px;">✦&nbsp;&nbsp;DeskPilot • Results</div>
+                    <div style="font-weight:650; color:{palette['success']}; margin-bottom:6px;">{heading}</div>
+                    {''.join(rows)}
+                </div>'''
+            )
+            self.activity_log.verticalScrollBar().setValue(self.activity_log.verticalScrollBar().maximum())
+            return
+
+        self.add_agent_message(message)
+
+
     # STATUS
     
 

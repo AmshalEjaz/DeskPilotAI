@@ -25,7 +25,9 @@ class ToolExecutor:
 
         "open_app",
         "close_app",
+        "close_window",
         "get_app_info",
+        "check_app_status",
         "count_images",
 
         "browser_open",
@@ -188,6 +190,19 @@ class ToolExecutor:
             )
 
         # =====================================================
+        # CLOSE WINDOW / FILE / FOLDER
+        # =====================================================
+
+        if tool == "close_window":
+
+            target = args.get("target") or args.get("item_name") or args.get("name")
+            if not target:
+                raise ValueError("Window, file, or folder name is required.")
+
+            message = self.app_agent.close_window(target)
+            return self._result(message=message)
+
+        # =====================================================
         # GET APP INFO
         # =====================================================
 
@@ -207,6 +222,39 @@ class ToolExecutor:
                     message += f"\nLocation: {location}"
 
             return self._result(message=message, data=info)
+
+        # =====================================================
+        # CHECK APP STATUS
+        # =====================================================
+
+        if tool == "check_app_status":
+
+            app_name = args.get("app_name")
+            if not app_name:
+                raise ValueError("App name is required.")
+
+            status = self.app_agent.check_app_status(app_name)
+
+            if status.get("running"):
+                process_names = ", ".join(status.get("process_names") or [])
+                message = f"{app_name} is currently running."
+                if process_names:
+                    message += f" Process: {process_names}."
+            elif status.get("installed"):
+                message = (
+                    f"{app_name} is installed, but it is not currently running. "
+                    "I can try to open it if you want."
+                )
+            else:
+                message = (
+                    f"I could not find {app_name} as an installed or running app "
+                    "on this PC."
+                )
+
+            return self._result(
+                message=message,
+                data=status
+            )
 
         # =====================================================
         # COUNT IMAGES
