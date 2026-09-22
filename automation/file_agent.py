@@ -34,9 +34,16 @@ class FileAgent:
             "pictures": self.pictures,
         }
 
-    # =========================================================
+        self.search_roots = [
+            self.pictures,
+            self.desktop,
+            self.downloads,
+            self.documents,
+        ]
+
+    
     # FIND WINDOWS USER FOLDER
-    # =========================================================
+    
 
     def _find_folder(
         self,
@@ -63,9 +70,9 @@ class FileAgent:
 
         return normal_path
 
-    # =========================================================
+    
     # NORMALIZE LOCATION
-    # =========================================================
+    
 
     def normalize_location(
         self,
@@ -98,6 +105,11 @@ class FileAgent:
             "pictures": "pictures",
             "photo": "pictures",
             "photos": "pictures",
+            "computer": "computer",
+            "pc": "computer",
+            "my pc": "computer",
+            "my computer": "computer",
+            "system": "computer",
         }
 
         return aliases.get(
@@ -105,9 +117,9 @@ class FileAgent:
             location
         )
 
-    # =========================================================
+    
     # RESOLVE LOCATION
-    # =========================================================
+    
 
     def get_location(
         self,
@@ -118,6 +130,9 @@ class FileAgent:
             location
         )
 
+        if location == "computer":
+            return None
+
         path = self.allowed_locations.get(
             location
         )
@@ -125,7 +140,7 @@ class FileAgent:
         if path is None:
 
             supported = ", ".join(
-                self.allowed_locations.keys()
+                list(self.allowed_locations.keys()) + ["computer"]
             )
 
             raise ValueError(
@@ -135,9 +150,9 @@ class FileAgent:
 
         return path
 
-    # =========================================================
+    
     # SAFETY
-    # =========================================================
+    
 
     def _safe_child(
         self,
@@ -168,9 +183,9 @@ class FileAgent:
 
         return target
 
-    # =========================================================
+    
     # OPEN FILE EXPLORER
-    # =========================================================
+    
 
     def open_file_explorer(
         self
@@ -186,9 +201,9 @@ class FileAgent:
             "File Explorer opened successfully."
         )
 
-    # =========================================================
+    
     # OPEN THIS PC
-    # =========================================================
+    
 
     def open_this_pc(
         self
@@ -205,9 +220,9 @@ class FileAgent:
             "This PC opened successfully."
         )
 
-    # =========================================================
+    
     # OPEN KNOWN FOLDER
-    # =========================================================
+    
 
     def open_folder(
         self,
@@ -238,9 +253,9 @@ class FileAgent:
             f"opened successfully."
         )
 
-    # =========================================================
+    
     # OPEN EXACT ITEM / PATH
-    # =========================================================
+    
 
     def open_item(
         self,
@@ -272,9 +287,9 @@ class FileAgent:
             f"'{item_name}' opened successfully."
         )
 
-    # =========================================================
+    
     # LIST FILES / FOLDERS
-    # =========================================================
+    
 
     def list_files(
         self,
@@ -311,9 +326,9 @@ class FileAgent:
 
         return items
 
-    # =========================================================
+    
     # FIND / SEARCH FILE OR FOLDER
-    # =========================================================
+    
 
     def find_item(
         self,
@@ -324,122 +339,59 @@ class FileAgent:
         limit=50
     ):
 
-        base_folder = self.get_location(
-            location
-        )
+        normalized_location = self.normalize_location(location)
+        if normalized_location == "computer":
+            roots = [p for p in self.search_roots if p.exists()]
+        else:
+            base_folder = self.get_location(normalized_location)
+            roots = [base_folder] if base_folder.exists() else []
 
-        if not base_folder.exists():
-
+        if not roots:
             raise FileNotFoundError(
-                f"{location.title()} "
-                f"does not exist."
+                f"{location.title()} does not exist or is unavailable."
             )
 
-        query = (
-            query
-            .strip()
-            .lower()
-        )
-
+        query = str(query).strip().lower()
         if not query:
-
-            raise ValueError(
-                "Search query cannot be empty."
-            )
+            raise ValueError("Search query cannot be empty.")
 
         normalized_type = None
-
         if item_type:
-
-            normalized_type = (
-                item_type
-                .strip()
-                .lower()
-            )
-
-            if normalized_type not in {
-                "file",
-                "folder"
-            }:
-
-                raise ValueError(
-                    "item_type must be "
-                    "'file' or 'folder'."
-                )
-
-        if recursive:
-
-            iterator = (
-                base_folder.rglob("*")
-            )
-
-        else:
-
-            iterator = (
-                base_folder.iterdir()
-            )
+            normalized_type = str(item_type).strip().lower()
+            if normalized_type in {"", "null", "none", "any"}:
+                normalized_type = None
+            elif normalized_type not in {"file", "folder"}:
+                raise ValueError("item_type must be 'file' or 'folder'.")
 
         matches = []
-
         try:
-
-            for item in iterator:
-
-                try:
-
-                    if (
-                        query
-                        not in
-                        item.name.lower()
-                    ):
-                        continue
-
-                    if (
-                        normalized_type == "file"
-                        and
-                        not item.is_file()
-                    ):
-                        continue
-
-                    if (
-                        normalized_type == "folder"
-                        and
-                        not item.is_dir()
-                    ):
-                        continue
-
-                    matches.append(
-                        {
+            for root in roots:
+                iterator = root.rglob("*") if recursive else root.iterdir()
+                for item in iterator:
+                    try:
+                        if query not in item.name.lower():
+                            continue
+                        if normalized_type == "file" and not item.is_file():
+                            continue
+                        if normalized_type == "folder" and not item.is_dir():
+                            continue
+                        matches.append({
                             "name": item.name,
-                            "type": (
-                                "Folder"
-                                if item.is_dir()
-                                else "File"
-                            ),
+                            "type": "Folder" if item.is_dir() else "File",
                             "path": str(item),
-                        }
-                    )
-
-                    if len(matches) >= limit:
-                        break
-
-                except (
-                    PermissionError,
-                    OSError
-                ):
-                    continue
-
-        except (
-            PermissionError,
-            OSError
-        ):
+                        })
+                        if len(matches) >= limit:
+                            return matches
+                    except (PermissionError, OSError):
+                        continue
+        except (PermissionError, OSError):
             pass
 
         return matches
 
-    # =========================================================
+    
     # FIND FILES BY EXTENSION
-    # =========================================================
+    
 
     def find_by_extension(
         self,
@@ -448,162 +400,90 @@ class FileAgent:
         recursive=True,
         limit=50
     ):
-
-        base_folder = self.get_location(
-            location
-        )
-
-        if not base_folder.exists():
-
-            return []
-
-        extension = (
-            extension
-            .strip()
-            .lower()
-        )
-
-        if not extension.startswith("."):
-
-            extension = (
-                "."
-                + extension
-            )
-
-        if recursive:
-
-            iterator = base_folder.rglob(
-                "*"
-            )
-
+        normalized_location = self.normalize_location(location)
+        if normalized_location == "computer":
+            roots = [p for p in self.search_roots if p.exists()]
         else:
+            base_folder = self.get_location(normalized_location)
+            roots = [base_folder] if base_folder.exists() else []
 
-            iterator = base_folder.iterdir()
+        extension = str(extension).strip().lower()
+        if not extension.startswith("."):
+            extension = "." + extension
 
         results = []
-
-        for item in iterator:
-
-            try:
-
-                if not item.is_file():
-                    continue
-
-                if (
-                    item.suffix.lower()
-                    != extension
-                ):
-                    continue
-
-                results.append(
-                    {
-                        "name": item.name,
-                        "type": "File",
-                        "path": str(item),
-                        "modified": (
-                            item.stat()
-                            .st_mtime
-                        ),
-                    }
-                )
-
-                if len(results) >= limit:
-                    break
-
-            except (
-                PermissionError,
-                OSError
-            ):
-                continue
-
+        try:
+            for root in roots:
+                iterator = root.rglob("*") if recursive else root.iterdir()
+                for item in iterator:
+                    try:
+                        if not item.is_file() or item.suffix.lower() != extension:
+                            continue
+                        results.append({
+                            "name": item.name,
+                            "type": "File",
+                            "path": str(item),
+                            "modified": item.stat().st_mtime,
+                        })
+                        if len(results) >= limit:
+                            return results
+                    except (PermissionError, OSError):
+                        continue
+        except (PermissionError, OSError):
+            pass
         return results
 
-    # =========================================================
+    
     # FIND LATEST FILE
-    # =========================================================
+    
 
     def find_latest_file(
         self,
         location,
         extension=None
     ):
+        normalized_location = self.normalize_location(location)
+        if normalized_location == "computer":
+            roots = [p for p in self.search_roots if p.exists()]
+        else:
+            root = self.get_location(normalized_location)
+            roots = [root] if root.exists() else []
 
-        base_folder = self.get_location(
-            location
-        )
-
-        if not base_folder.exists():
-            return None
+        normalized_extension = None
+        if extension:
+            normalized_extension = str(extension).lower().strip()
+            if not normalized_extension.startswith("."):
+                normalized_extension = "." + normalized_extension
 
         files = []
-
-        for item in base_folder.rglob(
-            "*"
-        ):
-
+        for root in roots:
             try:
-
-                if not item.is_file():
-                    continue
-
-                if extension:
-
-                    normalized_extension = (
-                        extension
-                        .lower()
-                        .strip()
-                    )
-
-                    if not normalized_extension.startswith(
-                        "."
-                    ):
-
-                        normalized_extension = (
-                            "."
-                            + normalized_extension
-                        )
-
-                    if (
-                        item.suffix.lower()
-                        != normalized_extension
-                    ):
-
+                for item in root.rglob("*"):
+                    try:
+                        if not item.is_file():
+                            continue
+                        if normalized_extension and item.suffix.lower() != normalized_extension:
+                            continue
+                        files.append(item)
+                    except (PermissionError, OSError):
                         continue
-
-                files.append(
-                    item
-                )
-
-            except (
-                PermissionError,
-                OSError
-            ):
+            except (PermissionError, OSError):
                 continue
 
         if not files:
             return None
 
-        latest = max(
-            files,
-            key=lambda path: (
-                path.stat()
-                .st_mtime
-            )
-        )
-
+        latest = max(files, key=lambda path: path.stat().st_mtime)
         return {
             "name": latest.name,
             "type": "File",
             "path": str(latest),
-            "modified": (
-                latest.stat()
-                .st_mtime
-            ),
+            "modified": latest.stat().st_mtime,
         }
 
-    # =========================================================
+    
     # CREATE FOLDER
-    # =========================================================
+    
 
     def create_folder(
         self,
@@ -641,9 +521,9 @@ class FileAgent:
             f"in {location.title()}."
         )
 
-    # =========================================================
+    
     # CREATE FILE
-    # =========================================================
+    
 
     def create_file(
         self,
@@ -685,9 +565,9 @@ class FileAgent:
             f"in {location.title()}."
         )
 
-    # =========================================================
+    
     # RENAME FILE / FOLDER
-    # =========================================================
+    
 
     def rename_item(
         self,
@@ -732,9 +612,9 @@ class FileAgent:
             f"'{new_name}'."
         )
 
-    # =========================================================
+    
     # COPY FILE / FOLDER
-    # =========================================================
+    
 
     def copy_item(
         self,
@@ -795,9 +675,9 @@ class FileAgent:
             f"to {destination_location.title()}."
         )
 
-    # =========================================================
+    
     # MOVE FILE / FOLDER
-    # =========================================================
+    
 
     def move_item(
         self,
@@ -848,3 +728,59 @@ class FileAgent:
             f"{source_location.title()} "
             f"to {destination_location.title()}."
         )
+        
+    # IMAGE EXTENSIONS
+    
+
+    IMAGE_EXTENSIONS = {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".gif",
+        ".bmp",
+        ".tif",
+        ".tiff",
+        ".heic",
+        ".heif",
+    }
+
+    
+    # COUNT IMAGES
+    
+
+    def count_images(
+        self,
+        location="pictures",
+        recursive=True
+    ):
+        location = self.normalize_location(location)
+
+        if location == "computer":
+            roots = [p for p in self.search_roots if p.exists()]
+        else:
+            root = self.get_location(location)
+            roots = [root] if root.exists() else []
+
+        total = 0
+        seen_files = set()
+
+        for root in roots:
+            try:
+                iterator = root.rglob("*") if recursive else root.glob("*")
+                for item in iterator:
+                    try:
+                        if not item.is_file() or item.suffix.lower() not in self.IMAGE_EXTENSIONS:
+                            continue
+                        resolved = str(item.resolve()).lower()
+                        if resolved in seen_files:
+                            continue
+                        seen_files.add(resolved)
+                        total += 1
+                    except (PermissionError, OSError):
+                        continue
+            except (PermissionError, OSError):
+                continue
+
+        return total
+

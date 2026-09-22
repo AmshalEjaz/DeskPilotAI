@@ -23,6 +23,11 @@ class ToolExecutor:
         "copy_item",
         "move_item",
 
+        "open_app",
+        "close_app",
+        "get_app_info",
+        "count_images",
+
         "browser_open",
         "browser_search",
         "browser_close",
@@ -39,6 +44,10 @@ class ToolExecutor:
         "downloads",
         "documents",
         "pictures",
+    }
+
+    SEARCH_LOCATIONS = {
+        "desktop", "downloads", "documents", "pictures", "computer"
     }
 
     # =========================================================
@@ -149,7 +158,110 @@ class ToolExecutor:
             raise ValueError(
                 f"Tool '{tool}' is not allowed."
             )
+        # =====================================================
+        # CLOSE APP
+        # =====================================================
 
+        if tool == "close_app":
+
+            app_name = (
+                args.get(
+                    "app_name"
+                )
+            )
+
+            if not app_name:
+
+                raise ValueError(
+                    "App name is required."
+                )
+
+            message = (
+                self.app_agent
+                .close_app(
+                    app_name
+                )
+            )
+
+            return self._result(
+                message=message
+            )
+
+        # =====================================================
+        # GET APP INFO
+        # =====================================================
+
+        if tool == "get_app_info":
+
+            app_name = args.get("app_name")
+            if not app_name:
+                raise ValueError("App name is required.")
+
+            info = self.app_agent.get_app_info(app_name)
+            if not info.get("found"):
+                message = f"I could not find an installed application named '{app_name}'."
+            else:
+                location = info.get("executable_path") or info.get("location") or info.get("shortcut_path")
+                message = f"{info.get('name') or app_name} is installed."
+                if location:
+                    message += f"\nLocation: {location}"
+
+            return self._result(message=message, data=info)
+
+        # =====================================================
+        # COUNT IMAGES
+        # =====================================================
+
+        if tool == "count_images":
+
+            location = (
+                args.get(
+                    "location",
+                    "pictures"
+                )
+            )
+
+            recursive = (
+                args.get(
+                    "recursive",
+                    True
+                )
+            )
+
+            count = (
+                self.file_agent
+                .count_images(
+                    location=location,
+                    recursive=recursive
+                )
+            )
+
+            if location in {
+                "system",
+                "computer",
+                "pc",
+                "my pc",
+            }:
+
+                message = (
+                    f"You have {count} image files "
+                    f"across your main user folders."
+                )
+
+            else:
+
+                message = (
+                    f"There are {count} image files "
+                    f"in the {location.title()} folder."
+                )
+
+            return self._result(
+                message=message,
+                data={
+                    "count": count,
+                    "location": location,
+                }
+            )
         # =====================================================
         # UNKNOWN
         # =====================================================
@@ -261,10 +373,8 @@ class ToolExecutor:
                 "item_name"
             )
 
-            location = (
-                self._validate_location(
-                    args["location"]
-                )
+            location = self._validate_search_location(
+                args["location"]
             )
 
             message = (
@@ -323,10 +433,8 @@ class ToolExecutor:
                 "query"
             )
 
-            location = (
-                self._validate_location(
-                    args["location"]
-                )
+            location = self._validate_search_location(
+                args["location"]
             )
 
             item_type = args.get(
@@ -954,6 +1062,33 @@ class ToolExecutor:
         return self._validate_location(
             args["location"]
         )
+
+    # =========================================================
+    # VALIDATE SEARCH LOCATION
+    # =========================================================
+
+    def _validate_search_location(self, location):
+        location = self._clean_text(location, "location")
+        aliases = {
+            "desktop": "desktop",
+            "download": "downloads",
+            "downloads": "downloads",
+            "document": "documents",
+            "documents": "documents",
+            "picture": "pictures",
+            "pictures": "pictures",
+            "photo": "pictures",
+            "photos": "pictures",
+            "computer": "computer",
+            "pc": "computer",
+            "my pc": "computer",
+            "my computer": "computer",
+            "system": "computer",
+        }
+        normalized = aliases.get(location.lower(), location.lower())
+        if normalized not in self.SEARCH_LOCATIONS:
+            raise ValueError(f"Search location '{location}' is not currently allowed.")
+        return normalized
 
     # =========================================================
     # VALIDATE LOCATION

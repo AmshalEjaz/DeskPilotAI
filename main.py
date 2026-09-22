@@ -5,6 +5,9 @@ import queue
 
 from automation.browser_agent import BrowserAgent
 from automation.file_agent import FileAgent
+from automation.app_agent import AppAgent
+from automation.planner_agent import PlannerAgent
+from automation.tool_executor import ToolExecutor
 
 from PySide6.QtCore import (
     Qt,
@@ -103,9 +106,9 @@ class BrowserWorker(QThread):
 
                 try:
 
-                    # -----------------------------------------
+        
                     # OPEN WEBSITE
-                    # -----------------------------------------
+        
 
                     if action == "open":
 
@@ -114,9 +117,9 @@ class BrowserWorker(QThread):
                             status_callback=self.status.emit,
                         )
 
-                    # -----------------------------------------
+        
                     # SEARCH WEBSITE
-                    # -----------------------------------------
+        
 
                     elif action == "search":
 
@@ -126,9 +129,9 @@ class BrowserWorker(QThread):
                             status_callback=self.status.emit,
                         )
 
-                    # -----------------------------------------
+        
                     # CLOSE WEBSITE
-                    # -----------------------------------------
+        
 
                     elif action == "close":
 
@@ -188,15 +191,19 @@ class DeskPilotWindow(QMainWindow):
 
         self.apply_theme()
 
-        # =====================================================
+        
         # FILE AGENT
-        # =====================================================
+        
 
         self.file_agent = FileAgent()
 
-        # =====================================================
+        self.app_agent = AppAgent()
+
+        self.planner = PlannerAgent()
+
+        
         # PERSISTENT BROWSER WORKER
-        # =====================================================
+        
 
         self.browser_worker = BrowserWorker(
             self
@@ -216,6 +223,14 @@ class DeskPilotWindow(QMainWindow):
 
         self.browser_worker.start()
 
+        self.tool_executor = ToolExecutor(
+            file_agent=self.file_agent,
+            app_agent=self.app_agent,
+            browser_open_callback=self.open_site,
+            browser_search_callback=self.search_site,
+            browser_close_callback=self.close_site,
+        )
+
         self.command_input.setFocus()
 
     
@@ -224,9 +239,9 @@ class DeskPilotWindow(QMainWindow):
 
     def build_ui(self):
 
-        # =====================================================
+        
         # CENTRAL WIDGET
-        # =====================================================
+        
 
         central_widget = QWidget()
 
@@ -253,9 +268,9 @@ class DeskPilotWindow(QMainWindow):
             20
         )
 
-        # =====================================================
+        
         # HEADER
-        # =====================================================
+        
 
         header = QHBoxLayout()
 
@@ -302,9 +317,9 @@ class DeskPilotWindow(QMainWindow):
 
         header.addStretch()
 
-        # =====================================================
+        
         # HEADER CONTROLS
-        # =====================================================
+        
 
         controls = QHBoxLayout()
 
@@ -316,9 +331,7 @@ class DeskPilotWindow(QMainWindow):
             Qt.AlignmentFlag.AlignTop
         )
 
-        # -----------------------------------------------------
         # THEME BUTTON
-        # -----------------------------------------------------
 
         self.theme_button = QPushButton(
             "🌙  Dark Mode"
@@ -340,9 +353,7 @@ class DeskPilotWindow(QMainWindow):
             Qt.CursorShape.PointingHandCursor
         )
 
-        # -----------------------------------------------------
         # STATUS
-        # -----------------------------------------------------
 
         self.status_label = QLabel(
             "●  Ready"
@@ -380,9 +391,9 @@ class DeskPilotWindow(QMainWindow):
             header
         )
 
-        # =====================================================
+        
         # COMMAND CARD
-        # =====================================================
+        
 
         command_card = QFrame()
 
@@ -421,9 +432,7 @@ class DeskPilotWindow(QMainWindow):
             "Description"
         )
 
-        # -----------------------------------------------------
         # COMMAND INPUT
-        # -----------------------------------------------------
 
         self.command_input = QLineEdit()
 
@@ -439,9 +448,7 @@ class DeskPilotWindow(QMainWindow):
             52
         )
 
-        # -----------------------------------------------------
         # RUN BUTTON
-        # -----------------------------------------------------
 
         button_row = QHBoxLayout()
 
@@ -491,9 +498,9 @@ class DeskPilotWindow(QMainWindow):
             command_card
         )
 
-        # =====================================================
+        
         # ACTIVITY CARD
-        # =====================================================
+        
 
         activity_card = QFrame()
 
@@ -548,9 +555,7 @@ class DeskPilotWindow(QMainWindow):
             self.clear_button
         )
 
-        # -----------------------------------------------------
         # ACTIVITY LOG
-        # -----------------------------------------------------
 
         self.activity_log = QTextEdit()
 
@@ -579,9 +584,9 @@ class DeskPilotWindow(QMainWindow):
             1
         )
 
-        # =====================================================
+        
         # FOOTER
-        # =====================================================
+        
 
         footer = QLabel(
             "DeskPilot AI  •  Local Desktop Agent"
@@ -599,9 +604,9 @@ class DeskPilotWindow(QMainWindow):
             footer
         )
 
-        # =====================================================
+        
         # EVENTS
-        # =====================================================
+        
 
         self.run_button.clicked.connect(
             self.run_command
@@ -624,7 +629,6 @@ class DeskPilotWindow(QMainWindow):
     
 
     def run_command(self):
-
         command = (
             self.command_input
             .text()
@@ -639,36 +643,176 @@ class DeskPilotWindow(QMainWindow):
 
             return
 
-        # Show user's command
+        # SHOW USER COMMAND
+
         self.add_user_message(
             command
         )
 
-        # Clear command input
         self.command_input.clear()
 
-        # Focus again
         self.command_input.setFocus()
+
+        self.status_label.setText(
+            "●  Planning"
+        )
+
+        # =====================================================
+        # STEP 1: ASK PLANNER TO UNDERSTAND USER LANGUAGE
+        # =====================================================
 
         try:
 
-            handled = self.process_command(
+            plan = self.planner.plan(
                 command
             )
 
-            if not handled:
+        except Exception as error:
+
+
+            # GROQ / PLANNER FAILED
+            # TRY OLD LOCAL PARSER AS FALLBACK
+
+
+            try:
+
+                handled = self.process_command(
+                    command
+                )
+
+            except Exception as fallback_error:
 
                 self.add_agent_message(
-                    "I don't know how to perform that action yet."
+                    f"Planner error: {error}"
+                )
+
+                self.add_agent_message(
+                    f"Fallback error: {fallback_error}"
                 )
 
                 self.set_status_ready()
 
+                return
+
+            if handled:
+
+                return
+
+            self.add_agent_message(
+                f"I could not understand the command "
+                f"because the AI planner is unavailable: "
+                f"{error}"
+            )
+
+            self.set_status_ready()
+
+            return
+
+        # =====================================================
+        # STEP 2: PLANNER COULD NOT MAP COMMAND
+        # =====================================================
+
+        if plan.get(
+            "tool"
+        ) == "unknown":
+
+            # Try old parser before giving up
+            try:
+
+                handled = self.process_command(
+                    command
+                )
+
+            except Exception as error:
+
+                self.add_agent_message(
+                    f"Command fallback failed: {error}"
+                )
+
+                self.set_status_ready()
+
+                return
+
+            if handled:
+
+                return
+
+            reason = (
+                plan.get(
+                    "args",
+                    {}
+                )
+                .get(
+                    "reason",
+                    "I don't know how to perform that action yet."
+                )
+            )
+
+            self.add_agent_message(
+                reason
+            )
+
+            self.set_status_ready()
+
+            return
+
+        # =====================================================
+        # STEP 3: EXECUTE PLANNER RESULT
+        # =====================================================
+
+        try:
+
+            result = (
+                self.tool_executor
+                .execute(
+                    plan
+                )
+            )
+
         except Exception as error:
 
             self.add_agent_message(
-                f"Something went wrong: {error}"
+                f"Action failed: {error}"
             )
+
+            self.set_status_ready()
+
+            return
+
+        # =====================================================
+        # STEP 4: SHOW RESULT
+        # =====================================================
+
+        if isinstance(
+            result,
+            dict
+        ):
+
+            message = result.get(
+                "message"
+            )
+
+            asynchronous = result.get(
+                "asynchronous",
+                False
+            )
+
+        else:
+
+            message = str(
+                result
+            )
+
+            asynchronous = False
+
+        if message:
+
+            self.add_agent_message(
+                message
+            )
+
+        # Browser worker will set Ready when finished
+        if not asynchronous:
 
             self.set_status_ready()
 
@@ -683,9 +827,9 @@ class DeskPilotWindow(QMainWindow):
 
         original = command.strip()
 
-        # =====================================================
+        
         # FILE LOCATION NORMALIZER
-        # =====================================================
+        
 
         def normalize_location(
             location
@@ -726,9 +870,9 @@ class DeskPilotWindow(QMainWindow):
             r"pictures?"
         )
 
-        # =====================================================
+        
         # FILE EXPLORER → OPEN LOCATION
-        # =====================================================
+        
 
         # Examples:
         #
@@ -780,9 +924,9 @@ class DeskPilotWindow(QMainWindow):
 
             return True
 
-        # =====================================================
+        
         # OPEN LOCAL FOLDER
-        # =====================================================
+        
 
         # Examples:
         #
@@ -829,9 +973,9 @@ class DeskPilotWindow(QMainWindow):
 
             return True
 
-        # =====================================================
+        
         # LIST FILES
-        # =====================================================
+        
 
         # Examples:
         #
@@ -925,9 +1069,9 @@ class DeskPilotWindow(QMainWindow):
 
             return True
 
-        # =====================================================
+        
         # CREATE FOLDER
-        # =====================================================
+        
 
         # Examples:
         #
@@ -986,9 +1130,9 @@ class DeskPilotWindow(QMainWindow):
 
             return True
 
-        # =====================================================
+        
         # CREATE FILE
-        # =====================================================
+        
 
         # Examples:
         #
@@ -1047,9 +1191,9 @@ class DeskPilotWindow(QMainWindow):
 
             return True
 
-        # =====================================================
+        
         # RENAME FILE / FOLDER
-        # =====================================================
+        
 
         # Example:
         #
@@ -1117,9 +1261,9 @@ class DeskPilotWindow(QMainWindow):
 
             return True
 
-        # =====================================================
+        
         # COPY FILE / FOLDER
-        # =====================================================
+        
 
         # Example:
         #
@@ -1190,9 +1334,9 @@ class DeskPilotWindow(QMainWindow):
 
             return True
 
-        # =====================================================
+        
         # MOVE FILE / FOLDER
-        # =====================================================
+        
 
         # Example:
         #
@@ -1263,9 +1407,9 @@ class DeskPilotWindow(QMainWindow):
 
             return True
 
-        # =====================================================
+        
         # BROWSER SITE CONFIG
-        # =====================================================
+        
 
         supported_sites = set(
             BrowserAgent
@@ -1292,9 +1436,9 @@ class DeskPilotWindow(QMainWindow):
             )
         )
 
-        # =====================================================
+        
         # CLOSE WEBSITE
-        # =====================================================
+        
 
         # Examples:
         #
@@ -1332,9 +1476,9 @@ class DeskPilotWindow(QMainWindow):
 
             return True
 
-        # =====================================================
+        
         # OPEN WEBSITE AND SEARCH
-        # =====================================================
+        
 
         # Example:
         #
@@ -1381,9 +1525,9 @@ class DeskPilotWindow(QMainWindow):
 
             return True
 
-        # =====================================================
+        
         # SEARCH QUERY IN / ON WEBSITE
-        # =====================================================
+        
 
         # Examples:
         #
@@ -1432,9 +1576,9 @@ class DeskPilotWindow(QMainWindow):
 
             return True
 
-        # =====================================================
+        
         # SEARCH WEBSITE FOR QUERY
-        # =====================================================
+        
 
         # Examples:
         #
@@ -1481,9 +1625,9 @@ class DeskPilotWindow(QMainWindow):
 
             return True
 
-        # =====================================================
+        
         # WEBSITE SEARCH QUERY
-        # =====================================================
+        
 
         # Examples:
         #
@@ -1530,9 +1674,9 @@ class DeskPilotWindow(QMainWindow):
 
             return True
 
-        # =====================================================
+        
         # OPEN WEBSITE
-        # =====================================================
+        
 
         # Examples:
         #
@@ -1569,10 +1713,7 @@ class DeskPilotWindow(QMainWindow):
             )
 
             return True
-
-        # =====================================================
-        # UNKNOWN COMMAND
-        # =====================================================
+        
 
         return False
 

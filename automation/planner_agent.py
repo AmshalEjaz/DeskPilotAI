@@ -1,197 +1,383 @@
 import json
-import urllib.request
-import urllib.error
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+from groq import Groq
 
 
 class PlannerAgent:
 
+    # =========================================================
+    # ALLOWED TOOLS
+    # =========================================================
+
+    ALLOWED_TOOLS = {
+        "open_file_explorer",
+        "open_this_pc",
+        "open_app",
+        "close_app",
+        "get_app_info",
+        "count_images",
+
+        "open_folder",
+        "open_item",
+        "list_files",
+        "find_item",
+        "find_by_extension",
+        "find_latest_file",
+
+        "create_folder",
+        "create_file",
+        "rename_item",
+        "copy_item",
+        "move_item",
+
+        "browser_open",
+        "browser_search",
+        "browser_close",
+
+        "unknown",
+    }
+
+    # =========================================================
+    # INIT
+    # =========================================================
+
     def __init__(
         self,
-        model="qwen2.5:3b-instruct",
-        ollama_url="http://localhost:11434/api/chat"
+        model=None,
     ):
 
-        self.model = model
-        self.ollama_url = ollama_url
+        # Project root:
+        #
+        # DeskPilotAI/
+        # ├── .env
+        # └── automation/
+        #     └── planner_agent.py
+
+        project_root = (
+            Path(__file__)
+            .resolve()
+            .parent
+            .parent
+        )
+
+        env_path = (
+            project_root
+            / ".env"
+        )
+
+        load_dotenv(
+            dotenv_path=env_path
+        )
+
+        self.api_key = os.getenv(
+            "GROQ_API_KEY"
+        )
+
+        if not self.api_key:
+
+            raise RuntimeError(
+                "GROQ_API_KEY was not found. "
+                "Add it to the project .env file."
+            )
+
+        self.model = (
+            model
+            or os.getenv(
+                "GROQ_MODEL",
+                "openai/gpt-oss-20b"
+            )
+        )
+
+        self.client = Groq(
+            api_key=self.api_key,
+            timeout=20.0,
+            max_retries=0,
+        )
 
     # =========================================================
     # SYSTEM PROMPT
     # =========================================================
 
-    def get_system_prompt(self):
+    def _system_prompt(
+        self
+    ):
 
         return """
-You are the planning engine for DeskPilot AI,
-a Windows desktop automation agent.
+You are the planning engine for DeskPilot AI.
 
-Your job is ONLY to understand the user's instruction
-and convert it into ONE structured JSON tool call.
+DeskPilot AI is a Windows desktop automation agent.
 
-The user may speak:
+Your ONLY job is to understand the user's command and convert
+it into exactly ONE approved structured tool call.
+
+The user may speak in:
 - English
 - Urdu
 - Roman Urdu
-- mixed English/Urdu
-- informal language
+- mixed English and Urdu
+- informal wording
+- different phrasings for the same task
 
-Do not execute anything yourself.
+You DO NOT perform the computer action yourself.
 
-Return JSON only.
+You only return a JSON plan.
 
-Available tools:
+============================================================
+OUTPUT FORMAT
+============================================================
+
+Return exactly one JSON object:
+
+{
+    "tool": "tool_name",
+    "args": {}
+}
+
+Do not return:
+- markdown
+- code fences
+- explanations
+- commentary
+- extra text
+
+============================================================
+IMPORTANT BEHAVIOR
+============================================================
+
+Understand meaning rather than matching exact wording.
+
+Examples of equivalent commands:
+
+"instagram kholo"
+"open instagram"
+"insta open kro"
+"launch instagram"
+
+All mean:
+
+{
+    "tool": "open_app",
+    "args": {
+        "app_name": "Instagram"
+    }
+}
+
+Likewise:
+
+"calculator kholo"
+"launch calculator"
+"open calc"
+
+should use open_app.
+
+Installed Windows applications should use:
+
+open_app
+
+Do NOT convert installed applications such as Instagram,
+Calculator, Notepad, WhatsApp, VS Code, Spotify, etc. into
+browser websites.
+
+Known websites such as Google, YouTube, GitHub, Bing,
+Wikipedia and DuckDuckGo can use browser tools.
+
+============================================================
+AVAILABLE TOOLS
+============================================================
 
 1. open_file_explorer
+
 Args:
+
 {}
 
-2. open_this_pc
-Args:
-{}
+Use when the user simply wants Windows File Explorer opened.
 
-3. open_folder
-Args:
-{
-    "location": "desktop|downloads|documents|pictures"
-}
+Example:
 
-4. open_item
-Args:
-{
-    "item_name": "name",
-    "location": "desktop|downloads|documents|pictures"
-}
-
-5. list_files
-Args:
-{
-    "location": "desktop|downloads|documents|pictures"
-}
-
-6. find_item
-Args:
-{
-    "query": "text",
-    "location": "desktop|downloads|documents|pictures",
-    "item_type": "file|folder|null"
-}
-
-7. find_by_extension
-Args:
-{
-    "extension": ".pdf",
-    "location": "desktop|downloads|documents|pictures"
-}
-
-8. find_latest_file
-Args:
-{
-    "location": "desktop|downloads|documents|pictures",
-    "extension": ".pdf|null"
-}
-
-9. create_folder
-Args:
-{
-    "folder_name": "name",
-    "location": "desktop|downloads|documents|pictures"
-}
-
-10. create_file
-Args:
-{
-    "file_name": "name",
-    "location": "desktop|downloads|documents|pictures"
-}
-
-11. rename_item
-Args:
-{
-    "old_name": "old name",
-    "new_name": "new name",
-    "location": "desktop|downloads|documents|pictures"
-}
-
-12. copy_item
-Args:
-{
-    "item_name": "name",
-    "source_location": "desktop|downloads|documents|pictures",
-    "destination_location": "desktop|downloads|documents|pictures"
-}
-
-13. move_item
-Args:
-{
-    "item_name": "name",
-    "source_location": "desktop|downloads|documents|pictures",
-    "destination_location": "desktop|downloads|documents|pictures"
-}
-
-14. browser_open
-Args:
-{
-    "site": "google|youtube|github|bing|wikipedia|duckduckgo"
-}
-
-15. browser_search
-Args:
-{
-    "site": "google|youtube|github|bing|wikipedia|duckduckgo",
-    "query": "search text"
-}
-
-16. browser_close
-Args:
-{
-    "site": "google|youtube|github|bing|wikipedia|duckduckgo"
-}
-
-17. unknown
-Args:
-{
-    "reason": "short explanation"
-}
-
-Important rules:
-
-- Never invent a tool.
-- Never invent missing important information.
-- Return only one tool call.
-- Do not return markdown.
-- Do not explain the answer.
-- Do not use code fences.
-- JSON must contain exactly:
-  {
-      "tool": "...",
-      "args": {...}
-  }
-
-Interpret natural language intelligently.
-
-Examples:
-
-User:
-open file explorer
+"open file explorer"
 
 Output:
+
 {
     "tool": "open_file_explorer",
     "args": {}
 }
 
-User:
-This PC kholo
+
+2. open_this_pc
+
+Args:
+
+{}
+
+Use when the user wants This PC / My Computer opened.
+
+Example:
+
+"This PC kholo"
 
 Output:
+
 {
     "tool": "open_this_pc",
     "args": {}
 }
 
-User:
-desktop me MyDeskPilotTest folder dhundo
 
-Output:
+3. open_app
+
+Args:
+
+{
+    "app_name": "application name"
+}
+
+Use for installed Windows applications.
+
+Examples:
+
+"instagram kholo"
+
+{
+    "tool": "open_app",
+    "args": {
+        "app_name": "Instagram"
+    }
+}
+
+"notepad open kro"
+
+{
+    "tool": "open_app",
+    "args": {
+        "app_name": "Notepad"
+    }
+}
+
+"open whatsapp"
+
+{
+    "tool": "open_app",
+    "args": {
+        "app_name": "WhatsApp"
+    }
+}
+
+
+4. close_app
+
+Args:
+
+{
+    "app_name": "application name"
+}
+
+Use when the user wants an installed Windows application closed.
+Examples: "chrome band karo", "close calculator", "notepad close kro".
+
+
+5. get_app_info
+
+Args:
+
+{
+    "app_name": "application name"
+}
+
+Use when the user asks where an installed application is, its information,
+or whether it is installed.
+
+
+6. count_images
+
+Args:
+
+{
+    "location": "pictures|desktop|downloads|documents|computer",
+    "recursive": true
+}
+
+Use for commands such as "how many images are on my computer",
+"computer mein kitni photos hain", or "pictures mein kitni images hain".
+Use "computer" when no specific folder is named.
+
+
+7. open_folder
+
+Args:
+
+{
+    "location": "desktop|downloads|documents|pictures"
+}
+
+Use for one of the approved standard folders.
+
+Example:
+
+"downloads kholo"
+
+{
+    "tool": "open_folder",
+    "args": {
+        "location": "downloads"
+    }
+}
+
+
+5. open_item
+
+Args:
+
+{
+    "item_name": "file or folder name",
+    "location": "desktop|downloads|documents|pictures"
+}
+
+Example:
+
+"desktop se report.pdf kholo"
+
+{
+    "tool": "open_item",
+    "args": {
+        "item_name": "report.pdf",
+        "location": "desktop"
+    }
+}
+
+
+6. list_files
+
+Args:
+
+{
+    "location": "desktop|downloads|documents|pictures"
+}
+
+Examples:
+
+"desktop ki files dikhao"
+"list files in downloads"
+
+
+7. find_item
+
+Args:
+
+{
+    "query": "text to search",
+    "location": "desktop|downloads|documents|pictures",
+    "item_type": "file|folder|null"
+}
+
+Example:
+
+"desktop me MyDeskPilotTest folder dhundo"
+
 {
     "tool": "find_item",
     "args": {
@@ -201,10 +387,51 @@ Output:
     }
 }
 
-User:
-downloads me latest pdf dhundo
+If the user does not specify whether it is a file or folder,
+use null for item_type.
 
-Output:
+For natural commands such as "report pdf dhundo", "mere PC mein report dhundo",
+"find my report", "file search karo", or "computer mein photos dhundo",
+use find_item and default location to "computer".
+
+
+8. find_by_extension
+
+Args:
+
+{
+    "extension": ".pdf",
+    "location": "desktop|downloads|documents|pictures|computer"
+}
+
+If no location is specified, use "computer".
+
+Example:
+
+"downloads ki sari pdf files dhundo"
+
+{
+    "tool": "find_by_extension",
+    "args": {
+        "extension": ".pdf",
+        "location": "downloads"
+    }
+}
+
+
+9. find_latest_file
+
+Args:
+
+{
+    "location": "desktop|downloads|documents|pictures",
+    "extension": ".pdf|null"
+}
+
+Example:
+
+"downloads me latest pdf dhundo"
+
 {
     "tool": "find_latest_file",
     "args": {
@@ -213,10 +440,110 @@ Output:
     }
 }
 
-User:
-youtube kholo
+Example:
 
-Output:
+"desktop ki latest file"
+
+{
+    "tool": "find_latest_file",
+    "args": {
+        "location": "desktop",
+        "extension": null
+    }
+}
+
+
+10. create_folder
+
+Args:
+
+{
+    "folder_name": "folder name",
+    "location": "desktop|downloads|documents|pictures"
+}
+
+Example:
+
+"desktop par Projects folder banao"
+
+{
+    "tool": "create_folder",
+    "args": {
+        "folder_name": "Projects",
+        "location": "desktop"
+    }
+}
+
+
+11. create_file
+
+Args:
+
+{
+    "file_name": "file name",
+    "location": "desktop|downloads|documents|pictures",
+    "content": "optional file content"
+}
+
+Example:
+
+"desktop par notes.txt banao"
+
+{
+    "tool": "create_file",
+    "args": {
+        "file_name": "notes.txt",
+        "location": "desktop",
+        "content": ""
+    }
+}
+
+
+12. rename_item
+
+Args:
+
+{
+    "old_name": "current name",
+    "new_name": "new name",
+    "location": "desktop|downloads|documents|pictures"
+}
+
+
+13. copy_item
+
+Args:
+
+{
+    "item_name": "name",
+    "source_location": "desktop|downloads|documents|pictures",
+    "destination_location": "desktop|downloads|documents|pictures"
+}
+
+
+14. move_item
+
+Args:
+
+{
+    "item_name": "name",
+    "source_location": "desktop|downloads|documents|pictures",
+    "destination_location": "desktop|downloads|documents|pictures"
+}
+
+
+15. browser_open
+
+Args:
+
+{
+    "site": "google|youtube|github|bing|wikipedia|duckduckgo"
+}
+
+Example:
+
+"youtube kholo"
+
 {
     "tool": "browser_open",
     "args": {
@@ -224,10 +551,20 @@ Output:
     }
 }
 
-User:
-youtube par laravel beginners search kro
 
-Output:
+16. browser_search
+
+Args:
+
+{
+    "site": "google|youtube|github|bing|wikipedia|duckduckgo",
+    "query": "search text"
+}
+
+Example:
+
+"youtube par laravel beginners search kro"
+
 {
     "tool": "browser_search",
     "args": {
@@ -235,10 +572,78 @@ Output:
         "query": "laravel beginners"
     }
 }
+
+
+17. browser_close
+
+Args:
+
+{
+    "site": "google|youtube|github|bing|wikipedia|duckduckgo"
+}
+
+Example:
+
+"bing close kro"
+
+{
+    "tool": "browser_close",
+    "args": {
+        "site": "bing"
+    }
+}
+
+
+18. unknown
+
+Args:
+
+{
+    "reason": "short explanation"
+}
+
+Use unknown when the requested operation cannot be represented
+by one of the approved tools.
+
+Do NOT invent a new tool.
+
+============================================================
+SAFETY AND ACCURACY RULES
+============================================================
+
+Never invent tool names.
+
+Never generate shell commands.
+
+Never generate PowerShell commands.
+
+Never execute commands yourself.
+
+Never use a browser tool for an installed Windows application
+unless the user specifically asks for the website.
+
+Do not use Instagram as a browser site.
+
+Do not assume unsupported file locations.
+
+Currently valid search locations are:
+
+desktop
+downloads
+documents
+pictures
+computer
+
+Use "computer" for searches/counts across the main user folders. Do not use it for destructive file operations.
+
+If required information is genuinely missing and the command
+cannot be safely mapped to a tool, return unknown.
+
+Return JSON only.
 """
 
     # =========================================================
-    # CALL OLLAMA
+    # PLAN COMMAND
     # =========================================================
 
     def plan(
@@ -246,7 +651,9 @@ Output:
         command
     ):
 
-        command = command.strip()
+        command = str(
+            command
+        ).strip()
 
         if not command:
 
@@ -254,84 +661,65 @@ Output:
                 "Command cannot be empty."
             )
 
-        payload = {
-            "model": self.model,
-
-            "messages": [
-                {
-                    "role": "system",
-                    "content": self.get_system_prompt()
-                },
-                {
-                    "role": "user",
-                    "content": command
-                }
-            ],
-
-            "stream": False,
-
-            "format": "json",
-
-            "options": {
-                "temperature": 0.1,
-                "top_p": 0.2
-            }
-        }
-
-        request_data = json.dumps(
-            payload
-        ).encode(
-            "utf-8"
-        )
-
-        request = urllib.request.Request(
-            self.ollama_url,
-            data=request_data,
-            headers={
-                "Content-Type": "application/json"
-            },
-            method="POST"
-        )
-
         try:
 
-            with urllib.request.urlopen(
-                request,
-                timeout=60
-            ) as response:
+            response = (
+                self.client
+                .chat
+                .completions
+                .create(
+                    model=self.model,
 
-                response_data = json.loads(
-                    response
-                    .read()
-                    .decode("utf-8")
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": self._system_prompt(),
+                        },
+                        {
+                            "role": "user",
+                            "content": command,
+                        },
+                    ],
+
+                    temperature=0,
+
+                    response_format={
+                        "type": "json_object"
+                    },
                 )
+            )
 
-        except urllib.error.URLError as error:
+        except Exception as error:
 
             raise RuntimeError(
-                "Could not connect to Ollama. "
-                "Make sure Ollama is running."
+                "Groq planner request failed: "
+                f"{error}"
             ) from error
 
         # =====================================================
-        # GET MODEL OUTPUT
+        # GET CONTENT
         # =====================================================
 
-        message = response_data.get(
-            "message",
-            {}
-        )
+        if not response.choices:
 
-        content = message.get(
-            "content",
-            ""
-        ).strip()
+            raise RuntimeError(
+                "Groq returned no planner response."
+            )
+
+        content = (
+            response
+            .choices[0]
+            .message
+            .content
+        )
 
         if not content:
 
             raise RuntimeError(
-                "Planner returned an empty response."
+                "Groq returned an empty planner response."
             )
+
+        content = content.strip()
 
         # =====================================================
         # PARSE JSON
@@ -346,12 +734,26 @@ Output:
         except json.JSONDecodeError as error:
 
             raise RuntimeError(
-                f"Planner returned invalid JSON: {content}"
+                "Planner returned invalid JSON:\n"
+                f"{content}"
             ) from error
 
         # =====================================================
-        # BASIC VALIDATION
+        # VALIDATE PLAN
         # =====================================================
+
+        return self._validate_plan(
+            plan
+        )
+
+    # =========================================================
+    # VALIDATE PLANNER OUTPUT
+    # =========================================================
+
+    def _validate_plan(
+        self,
+        plan
+    ):
 
         if not isinstance(
             plan,
@@ -359,7 +761,8 @@ Output:
         ):
 
             raise RuntimeError(
-                "Planner response must be a JSON object."
+                "Planner response must be "
+                "a JSON object."
             )
 
         tool = plan.get(
@@ -376,7 +779,17 @@ Output:
         ):
 
             raise RuntimeError(
-                "Planner response is missing a valid tool."
+                "Planner response is missing "
+                "a valid tool."
+            )
+
+        tool = tool.strip()
+
+        if tool not in self.ALLOWED_TOOLS:
+
+            raise RuntimeError(
+                f"Planner returned unsupported "
+                f"tool '{tool}'."
             )
 
         if not isinstance(
@@ -385,7 +798,11 @@ Output:
         ):
 
             raise RuntimeError(
-                "Planner response is missing valid args."
+                "Planner response must contain "
+                "an args object."
             )
 
-        return plan
+        return {
+            "tool": tool,
+            "args": args,
+        }

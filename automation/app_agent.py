@@ -1,6 +1,6 @@
+import json
 import os
 import re
-import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -9,11 +9,10 @@ from pathlib import Path
 class AppAgent:
 
     # =========================================================
-    # COMMON USER ALIASES
+    # USER-FRIENDLY APP ALIASES
     # =========================================================
 
     APP_ALIASES = {
-
         "insta": "instagram",
         "ig": "instagram",
 
@@ -26,7 +25,6 @@ class AppAgent:
         "vs code": "visual studio code",
 
         "chrome": "google chrome",
-
         "edge": "microsoft edge",
 
         "whatsapp desktop": "whatsapp",
@@ -37,7 +35,6 @@ class AppAgent:
     # =========================================================
 
     KNOWN_EXECUTABLES = {
-
         "notepad": [
             "notepad.exe",
         ],
@@ -90,8 +87,14 @@ class AppAgent:
 
         self._apps_cache = None
 
+        self.creation_flags = getattr(
+            subprocess,
+            "CREATE_NO_WINDOW",
+            0
+        )
+
     # =========================================================
-    # NORMALIZE TEXT
+    # TEXT NORMALIZATION
     # =========================================================
 
     def _normalize(
@@ -100,7 +103,6 @@ class AppAgent:
     ):
 
         if value is None:
-
             return ""
 
         value = (
@@ -124,7 +126,7 @@ class AppAgent:
         return value.strip()
 
     # =========================================================
-    # NORMALIZE APP NAME / ALIAS
+    # APP NAME NORMALIZATION
     # =========================================================
 
     def normalize_app_name(
@@ -132,23 +134,77 @@ class AppAgent:
         app_name
     ):
 
-        app_name = self._normalize(
+        normalized = self._normalize(
             app_name
         )
 
-        if not app_name:
+        if not normalized:
 
             raise ValueError(
                 "App name cannot be empty."
             )
 
         return self.APP_ALIASES.get(
-            app_name,
-            app_name
+            normalized,
+            normalized
         )
 
     # =========================================================
-    # GET WINDOWS START MENU APPS
+    # RUN POWERSHELL
+    # =========================================================
+
+    def _run_powershell(
+        self,
+        command,
+        timeout=20
+    ):
+
+        try:
+
+            result = subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    command,
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                creationflags=self.creation_flags,
+            )
+
+        except subprocess.TimeoutExpired as error:
+
+            raise RuntimeError(
+                "Windows app lookup timed out."
+            ) from error
+
+        except OSError as error:
+
+            raise RuntimeError(
+                "Could not start Windows PowerShell."
+            ) from error
+
+        if result.returncode != 0:
+
+            error_message = (
+                result.stderr.strip()
+                or
+                "PowerShell command failed."
+            )
+
+            raise RuntimeError(
+                error_message
+            )
+
+        return result.stdout.strip()
+
+    # =========================================================
+    # LOAD WINDOWS START APPS
     # =========================================================
 
     def _load_start_apps(
@@ -158,12 +214,13 @@ class AppAgent:
 
         if (
             self._apps_cache is not None
-            and not refresh
+            and
+            not refresh
         ):
 
             return self._apps_cache
 
-        powershell_command = (
+        command = (
             "[Console]::OutputEncoding="
             "[System.Text.Encoding]::UTF8; "
             "Get-StartApps | "
@@ -171,49 +228,8 @@ class AppAgent:
             "ConvertTo-Json -Compress"
         )
 
-        creation_flags = getattr(
-            subprocess,
-            "CREATE_NO_WINDOW",
-            0
-        )
-
-        try:
-
-            process = subprocess.run(
-                [
-                    "powershell.exe",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    powershell_command,
-                ],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=20,
-                creationflags=creation_flags,
-            )
-
-        except (
-            subprocess.SubprocessError,
-            OSError
-        ) as error:
-
-            raise RuntimeError(
-                "Could not read installed Windows apps."
-            ) from error
-
-        if process.returncode != 0:
-
-            raise RuntimeError(
-                "Windows could not return the "
-                "installed app list."
-            )
-
-        output = (
-            process.stdout
-            .strip()
+        output = self._run_powershell(
+            command
         )
 
         if not output:
@@ -231,8 +247,8 @@ class AppAgent:
         except json.JSONDecodeError as error:
 
             raise RuntimeError(
-                "Windows returned an invalid "
-                "installed-app response."
+                "Windows returned invalid "
+                "installed-app information."
             ) from error
 
         if isinstance(
@@ -313,33 +329,52 @@ class AppAgent:
         limit=20
     ):
 
-        query = self.normalize_app_name(
+        wanted = self.normalize_app_name(
             query
         )
 
         apps = self._load_start_apps()
 
-        matches = []
+        exact = []
+        starts = []
+        contains = []
 
         for app in apps:
 
-            normalized_name = self._normalize(
+            name = self._normalize(
                 app["name"]
             )
 
-            if query in normalized_name:
+            if name == wanted:
 
-                matches.append(
+                exact.append(
                     app
                 )
 
-            if len(matches) >= limit:
-                break
+            elif name.startswith(
+                wanted
+            ):
 
-        return matches
+                starts.append(
+                    app
+                )
+
+            elif wanted in name:
+
+                contains.append(
+                    app
+                )
+
+        matches = (
+            exact
+            + starts
+            + contains
+        )
+
+        return matches[:limit]
 
     # =========================================================
-    # FIND EXACT / BEST WINDOWS APP
+    # FIND BEST APP
     # =========================================================
 
     def find_app(
@@ -354,7 +389,7 @@ class AppAgent:
         apps = self._load_start_apps()
 
         # -----------------------------------------------------
-        # EXACT NORMALIZED MATCH
+        # EXACT MATCH
         # -----------------------------------------------------
 
         for app in apps:
@@ -371,7 +406,7 @@ class AppAgent:
         # STARTS-WITH MATCH
         # -----------------------------------------------------
 
-        starts_with = []
+        matches = []
 
         for app in apps:
 
@@ -383,19 +418,19 @@ class AppAgent:
                 wanted
             ):
 
-                starts_with.append(
+                matches.append(
                     app
                 )
 
-        if len(starts_with) == 1:
+        if len(matches) == 1:
 
-            return starts_with[0]
+            return matches[0]
 
         # -----------------------------------------------------
         # CONTAINS MATCH
         # -----------------------------------------------------
 
-        contains = []
+        matches = []
 
         for app in apps:
 
@@ -405,67 +440,56 @@ class AppAgent:
 
             if wanted in current:
 
-                contains.append(
+                matches.append(
                     app
                 )
 
-        if len(contains) == 1:
+        if len(matches) == 1:
 
-            return contains[0]
+            return matches[0]
 
         return None
 
     # =========================================================
-    # TRY KNOWN EXECUTABLE
+    # FIND KNOWN EXECUTABLE PATH
     # =========================================================
 
-    def _open_known_executable(
+    def _find_known_executable(
         self,
-        app_name
+        normalized_name
     ):
 
         candidates = self.KNOWN_EXECUTABLES.get(
-            app_name
+            normalized_name
         )
 
         if not candidates:
 
-            return False
+            return None
 
         for executable in candidates:
 
-            resolved = shutil.which(
+            path = shutil.which(
                 executable
             )
 
-            if not resolved:
-                continue
+            if path:
 
-            try:
-
-                subprocess.Popen(
-                    [
-                        resolved
-                    ]
+                return str(
+                    Path(path).resolve()
                 )
 
-                return True
-
-            except OSError:
-                continue
-
-        return False
+        return None
 
     # =========================================================
-    # FIND START MENU SHORTCUT
+    # START MENU LOCATIONS
     # =========================================================
 
-    def _find_start_menu_shortcut(
-        self,
-        app_name
+    def _get_start_menu_locations(
+        self
     ):
 
-        start_menu_locations = []
+        locations = []
 
         appdata = os.environ.get(
             "APPDATA"
@@ -477,7 +501,7 @@ class AppAgent:
 
         if appdata:
 
-            start_menu_locations.append(
+            locations.append(
                 Path(appdata)
                 / "Microsoft"
                 / "Windows"
@@ -487,7 +511,7 @@ class AppAgent:
 
         if programdata:
 
-            start_menu_locations.append(
+            locations.append(
                 Path(programdata)
                 / "Microsoft"
                 / "Windows"
@@ -495,13 +519,22 @@ class AppAgent:
                 / "Programs"
             )
 
-        # -----------------------------------------------------
-        # EXACT MATCH FIRST
-        # -----------------------------------------------------
+        return locations
+
+    # =========================================================
+    # FIND START MENU SHORTCUT
+    # =========================================================
+
+    def _find_start_menu_shortcut(
+        self,
+        app_name
+    ):
 
         possible_matches = []
 
-        for start_menu in start_menu_locations:
+        for start_menu in (
+            self._get_start_menu_locations()
+        ):
 
             if not start_menu.exists():
                 continue
@@ -512,15 +545,17 @@ class AppAgent:
                     "*.lnk"
                 ):
 
-                    normalized_name = self._normalize(
-                        shortcut.stem
+                    shortcut_name = (
+                        self._normalize(
+                            shortcut.stem
+                        )
                     )
 
-                    if normalized_name == app_name:
+                    if shortcut_name == app_name:
 
                         return shortcut
 
-                    if app_name in normalized_name:
+                    if app_name in shortcut_name:
 
                         possible_matches.append(
                             shortcut
@@ -540,7 +575,511 @@ class AppAgent:
         return None
 
     # =========================================================
-    # OPEN APP
+    # RESOLVE WINDOWS SHORTCUT TARGET
+    # =========================================================
+
+    def _resolve_shortcut_target(
+        self,
+        shortcut
+    ):
+
+        shortcut_path = str(
+            shortcut
+        )
+
+        safe_path = shortcut_path.replace(
+            "'",
+            "''"
+        )
+
+        command = (
+            "$shell = New-Object -ComObject WScript.Shell; "
+            f"$shortcut = $shell.CreateShortcut('{safe_path}'); "
+            "[PSCustomObject]@{"
+            "TargetPath=$shortcut.TargetPath;"
+            "Arguments=$shortcut.Arguments;"
+            "WorkingDirectory=$shortcut.WorkingDirectory"
+            "} | ConvertTo-Json -Compress"
+        )
+
+        try:
+
+            output = self._run_powershell(
+                command
+            )
+
+        except Exception:
+
+            return None
+
+        if not output:
+
+            return None
+
+        try:
+
+            result = json.loads(
+                output
+            )
+
+        except json.JSONDecodeError:
+
+            return None
+
+        if not isinstance(
+            result,
+            dict
+        ):
+
+            return None
+
+        return result
+
+    # =========================================================
+    # GET MICROSOFT STORE / APPX PACKAGE INFO
+    # =========================================================
+
+    def _get_appx_info(
+        self,
+        app_id
+    ):
+
+        if not app_id:
+            return None
+
+        # UWP / Store Start App IDs normally look like:
+        #
+        # PackageFamilyName!ApplicationId
+
+        if "!" not in app_id:
+            return None
+
+        package_family = app_id.split(
+            "!",
+            1
+        )[0]
+
+        safe_family = package_family.replace(
+            "'",
+            "''"
+        )
+
+        command = (
+            "[Console]::OutputEncoding="
+            "[System.Text.Encoding]::UTF8; "
+            "Get-AppxPackage | "
+            "Where-Object { "
+            f"$_.PackageFamilyName -eq '{safe_family}' "
+            "} | "
+            "Select-Object -First 1 "
+            "Name,"
+            "PackageFullName,"
+            "PackageFamilyName,"
+            "InstallLocation | "
+            "ConvertTo-Json -Compress"
+        )
+
+        try:
+
+            output = self._run_powershell(
+                command
+            )
+
+        except Exception:
+
+            return None
+
+        if not output:
+
+            return None
+
+        try:
+
+            result = json.loads(
+                output
+            )
+
+        except json.JSONDecodeError:
+
+            return None
+
+        if not isinstance(
+            result,
+            dict
+        ):
+
+            return None
+
+        return result
+
+    # =========================================================
+    # GET APP INFORMATION / LOCATION
+    # =========================================================
+
+    def get_app_info(
+        self,
+        app_name
+    ):
+
+        requested_name = str(
+            app_name
+        ).strip()
+
+        if not requested_name:
+
+            raise ValueError(
+                "App name cannot be empty."
+            )
+
+        normalized_name = (
+            self.normalize_app_name(
+                requested_name
+            )
+        )
+
+        result = {
+            "found": False,
+            "requested_name": requested_name,
+            "name": None,
+            "app_id": None,
+            "app_type": None,
+            "location": None,
+            "executable_path": None,
+            "shortcut_path": None,
+            "package_name": None,
+            "package_full_name": None,
+            "package_family_name": None,
+        }
+
+        # =====================================================
+        # KNOWN EXECUTABLE
+        # =====================================================
+
+        executable_path = (
+            self._find_known_executable(
+                normalized_name
+            )
+        )
+
+        if executable_path:
+
+            result.update(
+                {
+                    "found": True,
+                    "name": requested_name,
+                    "app_type": "desktop",
+                    "location": str(
+                        Path(
+                            executable_path
+                        ).parent
+                    ),
+                    "executable_path": (
+                        executable_path
+                    ),
+                }
+            )
+
+        # =====================================================
+        # START APPS
+        # =====================================================
+
+        installed_app = self.find_app(
+            normalized_name
+        )
+
+        if installed_app:
+
+            result["found"] = True
+            result["name"] = installed_app[
+                "name"
+            ]
+
+            result["app_id"] = installed_app[
+                "app_id"
+            ]
+
+            # -------------------------------------------------
+            # CHECK STORE / APPX PACKAGE
+            # -------------------------------------------------
+
+            appx_info = self._get_appx_info(
+                installed_app[
+                    "app_id"
+                ]
+            )
+
+            if appx_info:
+
+                install_location = (
+                    appx_info.get(
+                        "InstallLocation"
+                    )
+                )
+
+                result.update(
+                    {
+                        "app_type":
+                            "microsoft_store",
+
+                        "location":
+                            install_location,
+
+                        "package_name":
+                            appx_info.get(
+                                "Name"
+                            ),
+
+                        "package_full_name":
+                            appx_info.get(
+                                "PackageFullName"
+                            ),
+
+                        "package_family_name":
+                            appx_info.get(
+                                "PackageFamilyName"
+                            ),
+                    }
+                )
+
+        # =====================================================
+        # START MENU SHORTCUT
+        # =====================================================
+
+        shortcut = (
+            self._find_start_menu_shortcut(
+                normalized_name
+            )
+        )
+
+        if shortcut:
+
+            result["found"] = True
+
+            result["shortcut_path"] = str(
+                shortcut
+            )
+
+            shortcut_info = (
+                self._resolve_shortcut_target(
+                    shortcut
+                )
+            )
+
+            if shortcut_info:
+
+                target_path = (
+                    shortcut_info.get(
+                        "TargetPath"
+                    )
+                )
+
+                if target_path:
+
+                    result[
+                        "executable_path"
+                    ] = target_path
+
+                    try:
+
+                        result[
+                            "location"
+                        ] = str(
+                            Path(
+                                target_path
+                            ).parent
+                        )
+
+                    except Exception:
+
+                        pass
+
+                if not result["app_type"]:
+
+                    result[
+                        "app_type"
+                    ] = "desktop"
+
+        # =====================================================
+        # NOT FOUND
+        # =====================================================
+
+        if not result["found"]:
+
+            suggestions = self.search_apps(
+                normalized_name,
+                limit=5
+            )
+
+            result["suggestions"] = [
+                item["name"]
+                for item in suggestions
+            ]
+
+        return result
+
+    # =========================================================
+    # FORMAT APP INFORMATION
+    # =========================================================
+
+    def format_app_info(
+        self,
+        info
+    ):
+
+        if not info.get(
+            "found"
+        ):
+
+            requested = info.get(
+                "requested_name",
+                "application"
+            )
+
+            suggestions = info.get(
+                "suggestions",
+                []
+            )
+
+            if suggestions:
+
+                return (
+                    f"App '{requested}' was not "
+                    f"found exactly.\n"
+                    f"Possible matches: "
+                    f"{', '.join(suggestions)}"
+                )
+
+            return (
+                f"App '{requested}' "
+                f"was not found on this computer."
+            )
+
+        lines = [
+            (
+                "App found: "
+                f"{info.get('name')}"
+            )
+        ]
+
+        app_type = info.get(
+            "app_type"
+        )
+
+        if app_type:
+
+            if app_type == "microsoft_store":
+
+                lines.append(
+                    "Type: Microsoft Store app"
+                )
+
+            else:
+
+                lines.append(
+                    "Type: Desktop application"
+                )
+
+        app_id = info.get(
+            "app_id"
+        )
+
+        if app_id:
+
+            lines.append(
+                f"App ID: {app_id}"
+            )
+
+        executable_path = info.get(
+            "executable_path"
+        )
+
+        if executable_path:
+
+            lines.append(
+                "Executable: "
+                f"{executable_path}"
+            )
+
+        location = info.get(
+            "location"
+        )
+
+        if location:
+
+            lines.append(
+                f"Location: {location}"
+            )
+
+        shortcut_path = info.get(
+            "shortcut_path"
+        )
+
+        if shortcut_path:
+
+            lines.append(
+                "Start Menu shortcut: "
+                f"{shortcut_path}"
+            )
+
+        package_full_name = info.get(
+            "package_full_name"
+        )
+
+        if package_full_name:
+
+            lines.append(
+                "Package: "
+                f"{package_full_name}"
+            )
+
+        if (
+            not location
+            and
+            app_type == "microsoft_store"
+        ):
+
+            lines.append(
+                "Physical installation location "
+                "is managed by Windows."
+            )
+
+        return "\n".join(
+            lines
+        )
+
+    # =========================================================
+    # OPEN KNOWN EXECUTABLE
+    # =========================================================
+
+    def _open_known_executable(
+        self,
+        app_name
+    ):
+
+        path = self._find_known_executable(
+            app_name
+        )
+
+        if not path:
+
+            return False
+
+        try:
+
+            subprocess.Popen(
+                [
+                    path
+                ]
+            )
+
+            return True
+
+        except OSError:
+
+            return False
+
+    # =========================================================
+    # OPEN INSTALLED APP
     # =========================================================
 
     def open_app(
@@ -563,9 +1102,245 @@ class AppAgent:
                 requested_name
             )
         )
+            # =========================================================
+    # RUNNING APP PROCESS ALIASES
+    # =========================================================
+
+    PROCESS_ALIASES = {
+        "wps office": [
+            "wps",
+            "wpp",
+            "et",
+        ],
+
+        "wps": [
+            "wps",
+            "wpp",
+            "et",
+        ],
+
+        "instagram": [
+            "instagram",
+        ],
+
+        "notepad": [
+            "notepad",
+        ],
+
+        "calculator": [
+            "calculatorapp",
+            "calculator",
+        ],
+
+        "google chrome": [
+            "chrome",
+        ],
+
+        "chrome": [
+            "chrome",
+        ],
+
+        "microsoft edge": [
+            "msedge",
+        ],
+
+        "edge": [
+            "msedge",
+        ],
+
+        "visual studio code": [
+            "code",
+        ],
+
+        "vscode": [
+            "code",
+        ],
+    }
+
+    # =========================================================
+    # GET RUNNING WINDOWED APPS
+    # =========================================================
+
+    def _get_running_apps(self):
+
+        command = (
+            "[Console]::OutputEncoding="
+            "[System.Text.Encoding]::UTF8; "
+            "Get-Process | "
+            "Where-Object { $_.MainWindowHandle -ne 0 } | "
+            "Select-Object Id,ProcessName,MainWindowTitle | "
+            "ConvertTo-Json -Compress"
+        )
+
+        output = self._run_powershell(
+            command,
+            timeout=15
+        )
+
+        if not output:
+            return []
+
+        try:
+            data = json.loads(output)
+
+        except json.JSONDecodeError:
+            return []
+
+        if isinstance(data, dict):
+            data = [data]
+
+        if not isinstance(data, list):
+            return []
+
+        return data
+
+    # =========================================================
+    # CLOSE INSTALLED / DESKTOP APP
+    # =========================================================
+
+    def close_app(
+        self,
+        app_name
+    ):
+
+        requested_name = str(
+            app_name
+        ).strip()
+
+        if not requested_name:
+
+            raise ValueError(
+                "App name cannot be empty."
+            )
+
+        normalized_name = (
+            self.normalize_app_name(
+                requested_name
+            )
+        )
+
+        running_apps = (
+            self._get_running_apps()
+        )
+
+        process_aliases = (
+            self.PROCESS_ALIASES.get(
+                normalized_name,
+                []
+            )
+        )
+
+        matches = []
+
+        for process in running_apps:
+
+            process_name = self._normalize(
+                process.get(
+                    "ProcessName",
+                    ""
+                )
+            )
+
+            window_title = self._normalize(
+                process.get(
+                    "MainWindowTitle",
+                    ""
+                )
+            )
+
+            # Known process alias
+            alias_match = any(
+                self._normalize(alias)
+                == process_name
+                for alias in process_aliases
+            )
+
+            # Generic process name match
+            process_match = (
+                normalized_name == process_name
+                or
+                normalized_name in process_name
+                or
+                process_name in normalized_name
+            )
+
+            # Window title match
+            title_match = (
+                normalized_name
+                and
+                normalized_name in window_title
+            )
+
+            if (
+                alias_match
+                or
+                process_match
+                or
+                title_match
+            ):
+
+                matches.append(
+                    process
+                )
+
+        if not matches:
+
+            raise RuntimeError(
+                f"{requested_name} does not appear "
+                f"to be currently open."
+            )
+
+        closed_count = 0
+
+        for process in matches:
+
+            process_id = process.get(
+                "Id"
+            )
+
+            if not process_id:
+                continue
+
+            command = (
+                f"$p = Get-Process -Id {int(process_id)} "
+                f"-ErrorAction SilentlyContinue; "
+                "if ($p) { "
+                "$result = $p.CloseMainWindow(); "
+                "$result "
+                "}"
+            )
+
+            try:
+
+                output = self._run_powershell(
+                    command,
+                    timeout=10
+                )
+
+                if (
+                    output
+                    and
+                    output.strip().lower()
+                    == "true"
+                ):
+                    closed_count += 1
+
+            except Exception:
+                continue
+
+        if closed_count == 0:
+
+            raise RuntimeError(
+                f"Could not send a close request "
+                f"to {requested_name}."
+            )
+
+        return (
+            f"{requested_name} close request sent successfully."
+        )
 
         # =====================================================
-        # SPECIAL WINDOWS SETTINGS
+        # WINDOWS SETTINGS
         # =====================================================
 
         if normalized_name in {
@@ -595,21 +1370,21 @@ class AppAgent:
             )
 
         # =====================================================
-        # WINDOWS START APPS / MICROSOFT STORE APPS
+        # WINDOWS START APP
         # =====================================================
 
         installed_app = self.find_app(
             normalized_name
         )
 
-        if installed_app is not None:
-
-            app_id = installed_app[
-                "app_id"
-            ]
+        if installed_app:
 
             display_name = installed_app[
                 "name"
+            ]
+
+            app_id = installed_app[
+                "app_id"
             ]
 
             try:
@@ -646,7 +1421,7 @@ class AppAgent:
             )
         )
 
-        if shortcut is not None:
+        if shortcut:
 
             try:
 
@@ -683,8 +1458,8 @@ class AppAgent:
             )
 
             raise FileNotFoundError(
-                f"Could not find an exact app named "
-                f"'{requested_name}'. "
+                f"Could not find an exact app "
+                f"named '{requested_name}'. "
                 f"Possible matches: {names}"
             )
 

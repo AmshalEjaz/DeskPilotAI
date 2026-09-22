@@ -41,9 +41,6 @@ class BrowserAgent:
             "home": "https://duckduckgo.com",
             "search": "https://duckduckgo.com/?q={query}",
         },
-        "instagram": {
-          "home": "https://www.instagram.com",
-          },
     }
 
     ALIASES = {
