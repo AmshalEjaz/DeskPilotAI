@@ -64,6 +64,8 @@ class BrowserAgent:
         self.browser = None
         self.context = None
         self.page = None
+        self.chrome_process = None
+        self.chrome_port = None
 
     # =========================================================
     # SITE CONFIG
@@ -106,13 +108,12 @@ class BrowserAgent:
             if self.playwright is None:
                 return False
 
-            if self.browser is None:
-                return False
-
-            if not self.browser.is_connected():
-                return False
-
             if self.context is None:
+                return False
+
+            # launch_persistent_context returns the live browser context;
+            # there is no separate Browser object to check.
+            if self.context.pages is None:
                 return False
 
             if self.page is None:
@@ -131,7 +132,7 @@ class BrowserAgent:
             return False
 
     # =========================================================
-    # START / REUSE CHROMIUM
+    # START / REUSE CHROME
     # =========================================================
 
     def ensure_browser(
@@ -140,52 +141,127 @@ class BrowserAgent:
     ):
 
         def status(message):
-
             if status_callback:
                 status_callback(message)
 
-        # Reuse existing healthy browser
         if self.session_is_usable():
             return
 
-        # Remove stale/dead references
         self.close()
 
-        status(
-            "Opening Chromium..."
+        status("Opening Google Chrome...")
+
+        self.playwright = sync_playwright().start()
+
+        import os
+        import socket
+        import subprocess
+        import time
+        from pathlib import Path
+
+        # IMPORTANT:
+        # Do NOT use Playwright's launch()/launch_persistent_context() for
+        # YouTube here. Playwright adds automation-specific browser startup
+        # arguments, and YouTube playback is sensitive to browser/runtime
+        # differences. Instead, start the installed Chrome executable as a
+        # normal Chrome process with a dedicated profile, then attach to it
+        # through Chrome DevTools Protocol (CDP).
+        #
+        # This gives DeskPilot a real Chrome window while keeping the user's
+        # normal Chrome profile completely separate.
+        local_app_data = os.environ.get(
+            "LOCALAPPDATA",
+            os.path.join(os.path.expanduser("~"), "AppData", "Local")
         )
 
-        self.playwright = (
-            sync_playwright()
-            .start()
+        chrome_candidates = [
+            os.path.join(
+                local_app_data, "Google", "Chrome", "Application", "chrome.exe"
+            ),
+            os.path.join(
+                os.environ.get("PROGRAMFILES", r"C:\\Program Files"),
+                "Google", "Chrome", "Application", "chrome.exe"
+            ),
+            os.path.join(
+                os.environ.get("PROGRAMFILES(X86)", r"C:\\Program Files (x86)"),
+                "Google", "Chrome", "Application", "chrome.exe"
+            ),
+        ]
+
+        chrome_path = next(
+            (candidate for candidate in chrome_candidates if os.path.exists(candidate)),
+            None,
         )
 
-        self.browser = (
-            self.playwright
-            .chromium
-            .launch(
-                headless=False
+        if chrome_path is None:
+            raise RuntimeError(
+                "Google Chrome was not found. Install Google Chrome and try again."
             )
-        )
 
-        self.context = (
-            self.browser
-            .new_context(
-                viewport={
-                    "width": 1280,
-                    "height": 800,
-                }
+        # Pick a free localhost port instead of assuming 9222 is available.
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        profile_dir = os.path.join(
+            local_app_data,
+            "DeskPilotAI",
+            "ChromeCDPProfile",
+        )
+        Path(profile_dir).mkdir(parents=True, exist_ok=True)
+
+        command = [
+            chrome_path,
+            f"--remote-debugging-port={port}",
+            "--remote-debugging-address=127.0.0.1",
+            f"--user-data-dir={profile_dir}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--new-window",
+        ]
+
+        try:
+            self.chrome_process = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             )
-        )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not start Google Chrome: {exc}"
+            ) from exc
 
-        self.page = (
-            self.context
-            .new_page()
-        )
+        self.chrome_port = port
 
-        status(
-            "Chromium ready."
-        )
+        # Wait for Chrome's DevTools endpoint to become available.
+        endpoint = f"http://127.0.0.1:{port}"
+        last_error = None
+
+        for _ in range(60):
+            try:
+                self.browser = self.playwright.chromium.connect_over_cdp(endpoint)
+                break
+            except Exception as exc:
+                last_error = exc
+                time.sleep(0.25)
+        else:
+            self.close()
+            raise RuntimeError(
+                f"Could not connect to Google Chrome through CDP: {last_error}"
+            )
+
+        contexts = self.browser.contexts
+        if not contexts:
+            self.close()
+            raise RuntimeError("Chrome started, but no browser context was available.")
+
+        self.context = contexts[0]
+        pages = list(self.context.pages)
+        self.page = pages[0] if pages else self.context.new_page()
+
+        status("Google Chrome ready.")
 
     # =========================================================
     # NAVIGATION WITH AUTO RECOVERY
@@ -217,6 +293,11 @@ class BrowserAgent:
                     wait_until="domcontentloaded",
                     timeout=30000,
                 )
+
+                try:
+                    self.page.bring_to_front()
+                except Exception:
+                    pass
 
                 return
 
@@ -386,54 +467,54 @@ class BrowserAgent:
     # =========================================================
 
     def close(self):
-
-        # PAGE
-        try:
-
-            if (
-                self.page is not None
-                and not self.page.is_closed()
-            ):
-
-                self.page.close()
-
-        except Exception:
-            pass
-
-        # CONTEXT
-        try:
-
-            if self.context is not None:
-
-                self.context.close()
-
-        except Exception:
-            pass
-
-        # BROWSER
-        try:
-
-            if (
-                self.browser is not None
-                and self.browser.is_connected()
-            ):
-
-                self.browser.close()
-
-        except Exception:
-            pass
-
-        # PLAYWRIGHT
-        try:
-
-            if self.playwright is not None:
-
-                self.playwright.stop()
-
-        except Exception:
-            pass
+        context = self.context
+        page = self.page
+        browser = self.browser
+        playwright = self.playwright
+        chrome_process = self.chrome_process
 
         self.page = None
         self.context = None
         self.browser = None
         self.playwright = None
+        self.chrome_process = None
+        self.chrome_port = None
+
+        # CDP browser.close() disconnects Playwright from Chrome. The Chrome
+        # process itself is then terminated explicitly so DeskPilot does not
+        # leave an orphaned blank browser window behind.
+        try:
+            if browser is not None:
+                browser.close()
+        except Exception:
+            pass
+
+        try:
+            if context is not None:
+                context.close()
+        except Exception:
+            pass
+
+        try:
+            if page is not None and not page.is_closed():
+                page.close()
+        except Exception:
+            pass
+
+        try:
+            if playwright is not None:
+                playwright.stop()
+        except Exception:
+            pass
+
+        try:
+            if chrome_process is not None and chrome_process.poll() is None:
+                chrome_process.terminate()
+                chrome_process.wait(timeout=3)
+        except Exception:
+            try:
+                if chrome_process is not None and chrome_process.poll() is None:
+                    chrome_process.kill()
+            except Exception:
+                pass
+

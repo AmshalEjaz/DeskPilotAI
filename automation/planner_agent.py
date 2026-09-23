@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -705,6 +706,81 @@ cannot be safely mapped to a tool, return unknown.
 Return JSON only.
 """
 
+    def _repair_common_intent(self, command, plan):
+        """Make obvious desktop intents deterministic after the LLM plan."""
+        text = str(command or "").strip().lower()
+        compact = re.sub(r"\s+", " ", text)
+
+        browser_sites = {
+            "google": "google",
+            "youtube": "youtube",
+            "yt": "youtube",
+            "github": "github",
+            "bing": "bing",
+            "wikipedia": "wikipedia",
+            "duckduckgo": "duckduckgo",
+        }
+
+        # Browser close must use the dedicated browser worker so Chromium
+        # disappears instead of leaving an about:blank window behind.
+        for name, site in browser_sites.items():
+            if (re.search(rf"\b(?:close|quit|exit|band|bnd)\b.*\b{re.escape(name)}\b", compact)
+                    or re.search(rf"\b{re.escape(name)}\b.*\b(?:close|quit|exit|band|bnd)\b", compact)):
+                return {"tool": "browser_close", "args": {"site": site}}
+
+        # Browser search.
+        search_match = re.match(
+            r"^(?:open|go to|visit)?\s*(google|youtube|yt|github|bing|wikipedia|duckduckgo)"
+            r"\s+(?:and\s+)?search(?:\s+for)?\s+(.+)$",
+            compact,
+            re.IGNORECASE,
+        )
+        if search_match:
+            site = browser_sites[search_match.group(1).lower()]
+            return {
+                "tool": "browser_search",
+                "args": {"site": site, "query": search_match.group(2).strip()},
+            }
+
+        # Browser open.
+        for name, site in browser_sites.items():
+            if re.match(
+                rf"^(?:open|launch|go to|visit)\s+(?:the\s+)?{re.escape(name)}(?:\s+(?:website|site))?\s*$",
+                compact,
+                re.IGNORECASE,
+            ):
+                return {"tool": "browser_open", "args": {"site": site}}
+
+        # Files/folders/images/documents are windows, not installed apps.
+        close_match = re.match(
+            r"^(?:close|quit|exit|band|bnd)(?:\s+the)?\s+(.+)$",
+            compact,
+            re.IGNORECASE,
+        )
+        if close_match:
+            target = close_match.group(1).strip()
+            target = re.sub(
+                r"\s+(?:from|in)\s+(?:the\s+)?(?:desktop|downloads?|documents?|pictures?)\s*$",
+                "",
+                target,
+                flags=re.IGNORECASE,
+            ).strip()
+            filesystem_words = (
+                r"(?:folder|directory|window|file|image|photo|document|pdf|txt|docx|xlsx|pptx|csv|jpg|jpeg|png|gif|webp|bmp|svg)"
+            )
+            if re.search(filesystem_words, target, re.IGNORECASE) or target.lower() in {
+                "pictures", "downloads", "documents", "desktop", "this pc", "my pc", "file explorer"
+            } or re.search(r"\.[a-z0-9]{1,6}$", target, re.IGNORECASE):
+                target = re.sub(r"\s+(?:folder|directory|window)$", "", target, flags=re.IGNORECASE).strip()
+                return {"tool": "close_window", "args": {"target": target}}
+
+        # WAMP status questions should inspect the actual process state.
+        if (re.search(r"\b(?:wamp|wampp|wampserver|wamp server)\b", compact)
+                and re.search(r"\b(?:running|open|opened|on|active|status|not open|isn't open|isnt open|why)\b", compact)):
+            return {"tool": "check_app_status", "args": {"app_name": "WAMP"}}
+
+        return plan
+
     # =========================================================
     # PLAN COMMAND
     # =========================================================
@@ -804,6 +880,8 @@ Return JSON only.
         # =====================================================
         # VALIDATE PLAN
         # =====================================================
+
+        plan = self._repair_common_intent(command, plan)
 
         return self._validate_plan(
             plan

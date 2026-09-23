@@ -1822,10 +1822,11 @@ class DeskPilotWindow(QMainWindow):
         safe_label = html.escape(str(label))
         safe_message = html.escape(str(message)).replace("\n", "<br>")
 
+        # Keep speaker and message on the same line for a compact activity log.
         self.activity_log.append(
-            f'''<div style="margin:8px 2px 12px 2px; padding:12px 14px; background:{bg}; border:1px solid {border}; border-radius:12px;">
-                <div style="font-weight:700; color:{label_color}; margin-bottom:6px;">{icon_text}&nbsp;&nbsp;{safe_label}</div>
-                <div style="color:{palette['text']}; line-height:1.55;">{safe_message}</div>
+            f'''<div style="margin:2px 0 4px 0; padding:3px 8px; background:{bg}; border:1px solid {border}; border-radius:6px;">
+                <span style="font-weight:700; color:{label_color};">{icon_text}&nbsp;&nbsp;{safe_label}:</span>
+                <span style="color:{palette['text']}; line-height:1.35;">&nbsp;{safe_message}</span>
             </div>'''
         )
         self.activity_log.verticalScrollBar().setValue(self.activity_log.verticalScrollBar().maximum())

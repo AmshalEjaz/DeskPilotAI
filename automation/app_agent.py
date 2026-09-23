@@ -1406,11 +1406,12 @@ class AppAgent:
     # =========================================================
 
     def close_window(self, target):
-        """Close a visible Windows window whose title contains target.
+        """Close a visible file, folder, image, document, or other window.
 
-        This is intentionally separate from close_app because folders and
-        documents are owned by their host applications (Explorer, Notepad,
-        Photos, etc.) rather than being standalone processes.
+        Explorer folder windows are handled through Shell.Application first;
+        this closes the individual Explorer window instead of terminating
+        explorer.exe. A Win32 WM_CLOSE fallback handles documents, images,
+        PDFs, Notepad, Photos, and other visible windows by title.
         """
         requested = str(target or "").strip()
         if not requested:
@@ -1420,46 +1421,107 @@ class AppAgent:
         if not normalized:
             raise ValueError("Window, file, or folder name is required.")
 
+        escaped = requested.replace("'", "''")
+
+        # 1) Explorer/Shell window: target the individual folder window.
+        folder_script = fr"""
+$target = '{escaped}'
+$closed = 0
+try {{
+    $shell = New-Object -ComObject Shell.Application
+    foreach ($w in @($shell.Windows())) {{
+        try {{
+            $loc = [string]$w.LocationName
+            $full = ''
+            try {{ $full = [string]$w.Document.Folder.Self.Path }} catch {{}}
+            $href = [string]$w.FullName
+            if ($href -match '(?i)explorer\.exe$') {{
+                $hay = (($loc + ' ' + $full).ToLowerInvariant())
+                if ($hay.Contains($target.ToLowerInvariant())) {{
+                    $w.Quit()
+                    $closed++
+                }}
+            }}
+        }} catch {{}}
+    }}
+}} catch {{}}
+$closed
+"""
+        try:
+            output = self._run_powershell(folder_script, timeout=15)
+            if output and output.strip().isdigit() and int(output.strip()) > 0:
+                return f"'{requested}' closed successfully."
+        except Exception:
+            pass
+
+        # 2) Generic top-level window close using Win32 WM_CLOSE.
+        title_script = f"""
+Add-Type @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class DeskPilotWin32 {{
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+}}
+'@
+$target = '{escaped}'.ToLowerInvariant()
+$WM_CLOSE = 0x0010
+$closed = 0
+[DeskPilotWin32]::EnumWindows({{
+    param($hWnd, $lParam)
+    if (-not [DeskPilotWin32]::IsWindowVisible($hWnd)) {{ return $true }}
+    $sb = New-Object System.Text.StringBuilder 512
+    [void][DeskPilotWin32]::GetWindowText($hWnd, $sb, $sb.Capacity)
+    $title = $sb.ToString()
+    if ([string]::IsNullOrWhiteSpace($title)) {{ return $true }}
+    $lower = $title.ToLowerInvariant()
+    if ($lower.Contains('deskpilot ai')) {{ return $true }}
+    if ($lower.Contains($target)) {{
+        if ([DeskPilotWin32]::PostMessage($hWnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)) {{ $script:closed++ }}
+    }}
+    return $true
+}}, [IntPtr]::Zero) | Out-Null
+$closed
+"""
+        try:
+            output = self._run_powershell(title_script, timeout=15)
+            if output and output.strip().isdigit() and int(output.strip()) > 0:
+                return f"'{requested}' closed successfully."
+        except Exception:
+            pass
+
+        # 3) Last fallback for applications exposing a normal main window.
         windows = self._get_running_apps()
         matches = []
-
         for window in windows:
             title = str(window.get("MainWindowTitle") or "").strip()
-            if not title:
-                continue
-            normalized_title = self._normalize(title)
-            if normalized in normalized_title:
+            if title and normalized in self._normalize(title):
                 matches.append(window)
 
-        if not matches:
-            raise RuntimeError(
-                f"I could not find an open window for '{requested}'."
-            )
-
-        closed = 0
         for window in matches:
             process_id = window.get("Id")
             if not process_id:
                 continue
-
             command = (
                 f"$p = Get-Process -Id {int(process_id)} "
                 f"-ErrorAction SilentlyContinue; "
-                "if ($p) { $result = $p.CloseMainWindow(); $result }"
+                "if ($p) { $p.CloseMainWindow() }"
             )
             try:
-                output = self._run_powershell(command, timeout=10)
-                if output and output.strip().lower() == "true":
-                    closed += 1
+                self._run_powershell(command, timeout=10)
             except Exception:
-                continue
+                pass
 
-        if closed == 0:
-            raise RuntimeError(
-                f"I found '{requested}', but Windows did not allow the window to close."
-            )
+        if matches:
+            return f"'{requested}' close request sent successfully."
 
-        return f"'{requested}' closed successfully."
+        raise RuntimeError(
+            f"I could not find an open window for '{requested}'."
+        )
 
     # =========================================================
     # CLOSE INSTALLED / DESKTOP APP

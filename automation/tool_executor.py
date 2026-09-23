@@ -566,7 +566,7 @@ class ToolExecutor:
             )
 
             location = (
-                self._validate_location(
+                self._validate_search_location(
                     args["location"]
                 )
             )
@@ -607,8 +607,9 @@ class ToolExecutor:
 
         if tool == "find_latest_file":
 
-            location = self._get_location(
-                args
+            self._require(args, "location")
+            location = self._validate_search_location(
+                args["location"]
             )
 
             extension = args.get(
