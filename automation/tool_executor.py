@@ -597,6 +597,45 @@ class ToolExecutor:
                 )
             )
 
+            # Explicit "open <extension> files" commands mean open every
+            # matching file returned by the extension search.  Do not route
+            # this through fuzzy find_item(), and never open a different
+            # extension just because its filename looks similar.
+            if results and args.get("open_results") is True:
+                opened = []
+                failed = []
+                for item in results:
+                    path = item.get("path")
+                    if not path:
+                        continue
+                    try:
+                        if os.path.isfile(path):
+                            os.startfile(path)
+                            opened.append(item)
+                    except OSError:
+                        failed.append(item)
+
+                if not opened:
+                    return self._result(
+                        message=(
+                            f"Found {len(results)} {extension} file(s), "
+                            "but none could be opened."
+                        ),
+                        data=results,
+                    )
+
+                message = (
+                    f"Found and opened {len(opened)} {extension} file(s) "
+                    f"in {location.title()}.\n"
+                    + "\n".join(
+                        f"{item['name']}\n{item['path']}"
+                        for item in opened
+                    )
+                )
+                if failed:
+                    message += f"\n{len(failed)} file(s) could not be opened."
+                return self._result(message=message, data=opened)
+
             if not results:
 
                 message = (
@@ -1138,6 +1177,7 @@ class ToolExecutor:
         location = self._clean_text(location, "location")
         aliases = {
             "desktop": "desktop",
+            "destop": "desktop",
             "download": "downloads",
             "downloads": "downloads",
             "document": "documents",

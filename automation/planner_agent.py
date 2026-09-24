@@ -806,6 +806,63 @@ Return JSON only.
                     },
                 }
 
+        # ---------------------------------------------------------
+        # EXTENSION + LOCATION FILE COMMANDS
+        # ---------------------------------------------------------
+        # Handle commands such as:
+        #   open .txt files from destop
+        #   open all .txt files in desktop
+        #   find .pdf files in Downloads
+        #   search txt files from D drive
+        # These must NOT fall through to fuzzy find_item(), because that can
+        # return an unrelated filename (for example a .php file).
+        extension_location = (
+            r"my computer|this pc|downloads?|documents?|pictures?|desktop|"
+            r"destop|computer|pc|[A-Za-z]:(?:\s*drive)?|[A-Za-z]\s+drive|drive\s*[A-Za-z]"
+        )
+        extension_command = re.match(
+            rf"^(?P<action>open|launch|show|display|find|search|locate)\s+"
+            rf"(?P<all>all\s+)?(?:the\s+)?(?P<extension>\.?[A-Za-z0-9]{1,8})\s+"
+            rf"(?:files?|documents?)\s+(?:from|in|on|inside|under)\s+(?:the\s+)?"
+            rf"(?P<location>{extension_location})\s*$",
+            compact,
+            re.IGNORECASE,
+        )
+        if extension_command:
+            ext = extension_command.group("extension").strip()
+            if not ext.startswith("."):
+                ext = "." + ext
+
+            location = extension_command.group("location").strip()
+            location_aliases = {
+                "destop": "desktop",
+                "desktop": "desktop",
+                "download": "downloads",
+                "downloads": "downloads",
+                "document": "documents",
+                "documents": "documents",
+                "picture": "pictures",
+                "pictures": "pictures",
+                "computer": "computer",
+                "pc": "computer",
+                "my pc": "computer",
+                "my computer": "computer",
+                "this pc": "computer",
+            }
+            location = location_aliases.get(location.lower(), location)
+            if re.fullmatch(r"[A-Za-z]:?(?:\s*drive)?", location, re.IGNORECASE) or re.fullmatch(r"drive\s*[A-Za-z]", location, re.IGNORECASE):
+                location = self._normalize_command_location(location)
+
+            action = extension_command.group("action").lower()
+            return {
+                "tool": "find_by_extension",
+                "args": {
+                    "extension": ext,
+                    "location": location,
+                    "open_results": action in {"open", "launch"},
+                },
+            }
+
         # Natural file-search commands are deterministic so the user does not
         # need to know the exact filename or a single fixed sentence pattern.
         # Examples: "find amshal cv in pc", "amshal cv find in pc",

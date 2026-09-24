@@ -175,12 +175,12 @@ class DeskPilotWindow(QMainWindow):
 
         self.resize(
             920,
-            800
+            660
         )
 
         self.setMinimumSize(
             800,
-            700
+            580
         )
 
         # Default theme
@@ -441,7 +441,7 @@ class DeskPilotWindow(QMainWindow):
         )
 
         self.command_input.setPlaceholderText(
-            "Try: Open and search..."
+            "Try: Open and Search..."
         )
 
         self.command_input.setMinimumHeight(
@@ -467,7 +467,7 @@ class DeskPilotWindow(QMainWindow):
         )
 
         self.run_button.setMinimumWidth(
-            165
+            125
         )
 
         self.run_button.setCursor(
@@ -566,9 +566,6 @@ class DeskPilotWindow(QMainWindow):
         self.activity_log.setReadOnly(
             True
         )
-
-        # Give Agent Activity more vertical space.
-        self.activity_log.setMinimumHeight(340)
 
         self.activity_log.setPlaceholderText(
             "DeskPilot activity will appear here..."
@@ -1485,9 +1482,6 @@ class DeskPilotWindow(QMainWindow):
         # OPEN WEBSITE AND SEARCH
         
 
-        # Example:
-        #
-        # open youtube and search python for beginners
 
         match = re.match(
 
@@ -1681,14 +1675,6 @@ class DeskPilotWindow(QMainWindow):
 
         
         # OPEN WEBSITE
-        
-
-        # Examples:
-        #
-        # open youtube
-        # open the youtube
-        # launch github
-        # go to wikipedia
 
         match = re.match(
 
