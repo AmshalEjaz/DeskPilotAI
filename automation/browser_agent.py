@@ -67,9 +67,9 @@ class BrowserAgent:
         self.chrome_process = None
         self.chrome_port = None
 
-    # =========================================================
+    
     # SITE CONFIG
-    # =========================================================
+    
 
     def get_site_config(self, site):
 
@@ -97,9 +97,9 @@ class BrowserAgent:
 
         return site, config
 
-    # =========================================================
+    
     # CHECK CURRENT SESSION
-    # =========================================================
+    
 
     def session_is_usable(self):
 
@@ -131,9 +131,9 @@ class BrowserAgent:
 
             return False
 
-    # =========================================================
+    
     # START / REUSE CHROME
-    # =========================================================
+    
 
     def ensure_browser(
         self,
@@ -263,9 +263,9 @@ class BrowserAgent:
 
         status("Google Chrome ready.")
 
-    # =========================================================
+    
     # NAVIGATION WITH AUTO RECOVERY
-    # =========================================================
+    
 
     def navigate(
         self,
@@ -331,9 +331,9 @@ class BrowserAgent:
 
                 raise
 
-    # =========================================================
+    
     # OPEN WEBSITE
-    # =========================================================
+    
 
     def open_site(
         self,
@@ -363,9 +363,9 @@ class BrowserAgent:
             f"{site.title()} opened successfully."
         )
 
-    # =========================================================
+    
     # SEARCH WEBSITE
-    # =========================================================
+    
 
     def search_site(
         self,
@@ -425,9 +425,9 @@ class BrowserAgent:
                 "manually in Chromium."
             )
 
-    # =========================================================
+    
     # CLOSE WEBSITE
-    # =========================================================
+    
 
     def close_site(
         self,
@@ -462,9 +462,9 @@ class BrowserAgent:
 
         status(f"{site.title()} closed successfully.")
 
-    # =========================================================
+    
     # CLEANUP COMPLETE BROWSER
-    # =========================================================
+    
 
     def close(self):
         context = self.context

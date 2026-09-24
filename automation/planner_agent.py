@@ -9,9 +9,7 @@ from groq import Groq
 
 class PlannerAgent:
 
-    # =========================================================
     # ALLOWED TOOLS
-    # =========================================================
 
     ALLOWED_TOOLS = {
         "open_file_explorer",
@@ -22,77 +20,44 @@ class PlannerAgent:
         "get_app_info",
         "check_app_status",
         "count_images",
-
+        "local_diagnose",
         "open_folder",
         "open_item",
         "list_files",
         "find_item",
         "find_by_extension",
         "find_latest_file",
-
         "create_folder",
         "create_file",
         "rename_item",
         "copy_item",
         "move_item",
-
         "browser_open",
         "browser_search",
         "browser_close",
-
         "unknown",
     }
-
-    # =========================================================
-    # INIT
-    # =========================================================
 
     def __init__(
         self,
         model=None,
     ):
 
-        # Project root:
-        #
-        # DeskPilotAI/
-        # ├── .env
-        # └── automation/
-        #     └── planner_agent.py
+        project_root = Path(__file__).resolve().parent.parent
 
-        project_root = (
-            Path(__file__)
-            .resolve()
-            .parent
-            .parent
-        )
+        env_path = project_root / ".env"
 
-        env_path = (
-            project_root
-            / ".env"
-        )
+        load_dotenv(dotenv_path=env_path)
 
-        load_dotenv(
-            dotenv_path=env_path
-        )
-
-        self.api_key = os.getenv(
-            "GROQ_API_KEY"
-        )
+        self.api_key = os.getenv("GROQ_API_KEY")
 
         if not self.api_key:
 
             raise RuntimeError(
-                "GROQ_API_KEY was not found. "
-                "Add it to the project .env file."
+                "GROQ_API_KEY was not found. " "Add it to the project .env file."
             )
 
-        self.model = (
-            model
-            or os.getenv(
-                "GROQ_MODEL",
-                "openai/gpt-oss-20b"
-            )
-        )
+        self.model = model or os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
         self.client = Groq(
             api_key=self.api_key,
@@ -100,13 +65,9 @@ class PlannerAgent:
             max_retries=0,
         )
 
-    # =========================================================
     # SYSTEM PROMPT
-    # =========================================================
 
-    def _system_prompt(
-        self
-    ):
+    def _system_prompt(self):
 
         return """
 You are the planning engine for DeskPilot AI.
@@ -658,7 +619,30 @@ Example:
 }
 
 
-18. unknown
+18. local_diagnose
+
+Args:
+
+{
+    "query": "the user's system-related question"
+}
+
+Use for questions about the user's own Windows PC, installed software,
+running processes, ports, disk space, Python/Node/PHP availability,
+WAMP/Apache/MySQL status, Chrome/browser state, or why a local
+system component may not be working.
+
+DeskPilot checks the local PC only. Do NOT use browser tools or web search
+for these questions.
+
+Examples:
+"why is WAMP not starting"
+"check my Python environment"
+"why is Chrome not working"
+"check my disk space"
+"is Apache running"
+
+19. unknown
 
 Args:
 
@@ -724,8 +708,11 @@ Return JSON only.
         # Browser close must use the dedicated browser worker so Chromium
         # disappears instead of leaving an about:blank window behind.
         for name, site in browser_sites.items():
-            if (re.search(rf"\b(?:close|quit|exit|band|bnd)\b.*\b{re.escape(name)}\b", compact)
-                    or re.search(rf"\b{re.escape(name)}\b.*\b(?:close|quit|exit|band|bnd)\b", compact)):
+            if re.search(
+                rf"\b(?:close|quit|exit|band|bnd)\b.*\b{re.escape(name)}\b", compact
+            ) or re.search(
+                rf"\b{re.escape(name)}\b.*\b(?:close|quit|exit|band|bnd)\b", compact
+            ):
                 return {"tool": "browser_close", "args": {"site": site}}
 
         # Browser search.
@@ -765,183 +752,136 @@ Return JSON only.
                 target,
                 flags=re.IGNORECASE,
             ).strip()
-            filesystem_words = (
-                r"(?:folder|directory|window|file|image|photo|document|pdf|txt|docx|xlsx|pptx|csv|jpg|jpeg|png|gif|webp|bmp|svg)"
-            )
-            if re.search(filesystem_words, target, re.IGNORECASE) or target.lower() in {
-                "pictures", "downloads", "documents", "desktop", "this pc", "my pc", "file explorer"
-            } or re.search(r"\.[a-z0-9]{1,6}$", target, re.IGNORECASE):
-                target = re.sub(r"\s+(?:folder|directory|window)$", "", target, flags=re.IGNORECASE).strip()
+            filesystem_words = r"(?:folder|directory|window|file|image|photo|document|pdf|txt|docx|xlsx|pptx|csv|jpg|jpeg|png|gif|webp|bmp|svg)"
+            if (
+                re.search(filesystem_words, target, re.IGNORECASE)
+                or target.lower()
+                in {
+                    "pictures",
+                    "downloads",
+                    "documents",
+                    "desktop",
+                    "this pc",
+                    "my pc",
+                    "file explorer",
+                }
+                or re.search(r"\.[a-z0-9]{1,6}$", target, re.IGNORECASE)
+            ):
+                target = re.sub(
+                    r"\s+(?:folder|directory|window)$", "", target, flags=re.IGNORECASE
+                ).strip()
                 return {"tool": "close_window", "args": {"target": target}}
 
-        # WAMP status questions should inspect the actual process state.
-        if (re.search(r"\b(?:wamp|wampp|wampserver|wamp server)\b", compact)
-                and re.search(r"\b(?:running|open|opened|on|active|status|not open|isn't open|isnt open|why)\b", compact)):
-            return {"tool": "check_app_status", "args": {"app_name": "WAMP"}}
+        # Local system questions should use the diagnostic layer, not a
+        # generic browser/search path.
+        local_terms = (
+            r"\b(?:why|problem|issue|error|check|diagnose|status|"
+            r"not working|isn't working|isnt working|not starting|"
+            r"not opening|isn't opening|isnt opening|running|"
+            r"disk|storage|space|port|process|python|php|node|npm|"
+            r"apache|mysql|wamp|wampp|wampserver|chrome|browser|"
+            r"youtube)\b"
+        )
+        diagnostic_intent = re.search(
+            r"\b(?:why|problem|issue|error|check|diagnose|status|"
+            r"not working|isn't working|isnt working|not starting|"
+            r"not opening|isn't opening|isnt opening|how|what happened)\b",
+            compact,
+        ) or re.search(r"\b(?:disk|storage|space|port|process)\b", compact)
+        if diagnostic_intent and re.search(local_terms, compact):
+            return {"tool": "local_diagnose", "args": {"query": command}}
 
         return plan
 
-    # =========================================================
     # PLAN COMMAND
-    # =========================================================
 
-    def plan(
-        self,
-        command
-    ):
+    def plan(self, command):
 
-        command = str(
-            command
-        ).strip()
+        command = str(command).strip()
 
         if not command:
 
-            raise ValueError(
-                "Command cannot be empty."
-            )
+            raise ValueError("Command cannot be empty.")
 
         try:
 
-            response = (
-                self.client
-                .chat
-                .completions
-                .create(
-                    model=self.model,
-
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": self._system_prompt(),
-                        },
-                        {
-                            "role": "user",
-                            "content": command,
-                        },
-                    ],
-
-                    temperature=0,
-
-                    response_format={
-                        "type": "json_object"
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": self._system_prompt(),
                     },
-                )
+                    {
+                        "role": "user",
+                        "content": command,
+                    },
+                ],
+                temperature=0,
+                response_format={"type": "json_object"},
             )
 
         except Exception as error:
 
-            raise RuntimeError(
-                "Groq planner request failed: "
-                f"{error}"
-            ) from error
+            raise RuntimeError("Groq planner request failed: " f"{error}") from error
 
-        # =====================================================
         # GET CONTENT
-        # =====================================================
 
         if not response.choices:
 
-            raise RuntimeError(
-                "Groq returned no planner response."
-            )
+            raise RuntimeError("Groq returned no planner response.")
 
-        content = (
-            response
-            .choices[0]
-            .message
-            .content
-        )
+        content = response.choices[0].message.content
 
         if not content:
 
-            raise RuntimeError(
-                "Groq returned an empty planner response."
-            )
+            raise RuntimeError("Groq returned an empty planner response.")
 
         content = content.strip()
 
-        # =====================================================
         # PARSE JSON
-        # =====================================================
 
         try:
 
-            plan = json.loads(
-                content
-            )
+            plan = json.loads(content)
 
         except json.JSONDecodeError as error:
 
             raise RuntimeError(
-                "Planner returned invalid JSON:\n"
-                f"{content}"
+                "Planner returned invalid JSON:\n" f"{content}"
             ) from error
 
-        # =====================================================
         # VALIDATE PLAN
-        # =====================================================
 
         plan = self._repair_common_intent(command, plan)
 
-        return self._validate_plan(
-            plan
-        )
+        return self._validate_plan(plan)
 
-    # =========================================================
     # VALIDATE PLANNER OUTPUT
-    # =========================================================
 
-    def _validate_plan(
-        self,
-        plan
-    ):
+    def _validate_plan(self, plan):
 
-        if not isinstance(
-            plan,
-            dict
-        ):
+        if not isinstance(plan, dict):
 
-            raise RuntimeError(
-                "Planner response must be "
-                "a JSON object."
-            )
+            raise RuntimeError("Planner response must be " "a JSON object.")
 
-        tool = plan.get(
-            "tool"
-        )
+        tool = plan.get("tool")
 
-        args = plan.get(
-            "args"
-        )
+        args = plan.get("args")
 
-        if not isinstance(
-            tool,
-            str
-        ):
+        if not isinstance(tool, str):
 
-            raise RuntimeError(
-                "Planner response is missing "
-                "a valid tool."
-            )
+            raise RuntimeError("Planner response is missing " "a valid tool.")
 
         tool = tool.strip()
 
         if tool not in self.ALLOWED_TOOLS:
 
-            raise RuntimeError(
-                f"Planner returned unsupported "
-                f"tool '{tool}'."
-            )
+            raise RuntimeError(f"Planner returned unsupported " f"tool '{tool}'.")
 
-        if not isinstance(
-            args,
-            dict
-        ):
+        if not isinstance(args, dict):
 
-            raise RuntimeError(
-                "Planner response must contain "
-                "an args object."
-            )
+            raise RuntimeError("Planner response must contain " "an args object.")
 
         return {
             "tool": tool,
