@@ -1,6 +1,8 @@
 import os
 import shutil
 import subprocess
+import re
+from difflib import SequenceMatcher
 
 from pathlib import Path
 
@@ -34,14 +36,37 @@ class FileAgent:
             "pictures": self.pictures,
         }
 
-        self.search_roots = [
-            self.pictures,
-            self.desktop,
-            self.downloads,
-            self.documents,
-        ]
+        # Searches labeled as "computer/PC" cover all available Windows
+        # drive roots, not just Desktop/Downloads/Documents/Pictures.
+        self.search_roots = self._build_search_roots()
 
     
+    def _build_search_roots(self):
+        roots = []
+
+        # Include every available Windows drive (C:, D:, E:, ...).
+        # This makes "find ... in computer" genuinely mean the PC.
+        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            drive = Path(f"{letter}:\\")
+            try:
+                if drive.exists():
+                    roots.append(drive)
+            except OSError:
+                continue
+
+        unique = []
+        seen = set()
+        # Fallback for unusual Windows environments where drive-root probing
+        # is unavailable.
+        if not unique:
+            for path in (self.pictures, self.desktop, self.downloads, self.documents):
+                if path and path.exists():
+                    key = str(path).casefold()
+                    if key not in seen:
+                        seen.add(key)
+                        unique.append(path)
+        return unique
+
     # FIND WINDOWS USER FOLDER
     
 
@@ -91,6 +116,12 @@ class FileAgent:
             .strip()
         )
 
+        # Accept natural drive references such as "D drive", "D: drive",
+        # "D:", or "drive D".
+        drive_match = re.match(r"^(?:drive\s*)?([a-z])(?:\s*drive)?(?::)?$", location, re.IGNORECASE)
+        if drive_match:
+            return f"{drive_match.group(1).upper()}:"
+
         aliases = {
 
             "desktop": "desktop",
@@ -132,6 +163,12 @@ class FileAgent:
 
         if location == "computer":
             return None
+
+        if re.fullmatch(r"[A-Z]:", location):
+            path = Path(f"{location}\\")
+            if path.exists():
+                return path
+            raise ValueError(f"Drive {location} is not available.")
 
         path = self.allowed_locations.get(
             location
@@ -327,8 +364,103 @@ class FileAgent:
         return items
 
     
+    # SEARCH HELPERS
+
+    @staticmethod
+    def _search_text(value):
+        """Normalize a human filename query for forgiving matching.
+
+        Spaces, underscores, hyphens, dots and other punctuation are treated
+        as separators so users do not need to know the exact filename format.
+        """
+        value = str(value or "").casefold()
+        value = re.sub(r"[^a-z0-9]+", " ", value)
+        return re.sub(r"\s+", " ", value).strip()
+
+    @classmethod
+    def _query_tokens(cls, query):
+        """Turn a natural search phrase into useful filename terms."""
+        text = cls._search_text(query)
+        filler = {
+            "find", "search", "look", "lookup", "locate", "show",
+            "get", "open", "where", "is", "my", "me", "please",
+            "file", "files", "folder", "folders", "item", "items",
+            "document", "documents",
+        }
+        tokens = [t for t in text.split() if t not in filler]
+
+        # Common human descriptions -> filename vocabulary.
+        aliases = {
+            "resume": {"resume", "cv"},
+            "curriculum": {"curriculum", "cv", "vitae"},
+            "vitae": {"vitae", "cv", "resume"},
+            "cv": {"cv", "resume"},
+            "photo": {"photo", "photos", "image", "images", "pic", "pics"},
+            "photos": {"photos", "photo", "images", "image", "pics", "pic"},
+            "picture": {"picture", "pictures", "image", "images", "photo", "photos"},
+            "pictures": {"pictures", "picture", "images", "image", "photos", "photo"},
+        }
+
+        expanded = []
+        for token in tokens:
+            expanded.append(aliases.get(token, {token}))
+        return tokens, expanded
+
+    @classmethod
+    def _filename_match_score(cls, query, filename):
+        """Return a 0..1 relevance score for forgiving natural-language search."""
+        q = cls._search_text(query)
+        name = cls._search_text(filename)
+
+        if not q or not name:
+            return 0.0
+
+        if q == name:
+            return 1.0
+        if q in name:
+            return 0.96
+
+        q_tokens, expanded = cls._query_tokens(query)
+        name_tokens = name.split()
+        if not q_tokens:
+            return 0.0
+
+        # Every requested concept must have a reasonably close filename token.
+        concept_scores = []
+        for choices in expanded:
+            best = 0.0
+            for wanted in choices:
+                for actual in name_tokens:
+                    if wanted == actual:
+                        best = max(best, 1.0)
+                    elif wanted in actual or actual in wanted:
+                        best = max(best, 0.90)
+                    else:
+                        best = max(best, SequenceMatcher(None, wanted, actual).ratio())
+            concept_scores.append(best)
+
+        if concept_scores and min(concept_scores) >= 0.72:
+            return min(0.95, sum(concept_scores) / len(concept_scores))
+
+        # Compact comparison handles spaces/underscores/hyphens and small typos.
+        compact_q = q.replace(" ", "")
+        compact_name = name.replace(" ", "")
+        ratio = SequenceMatcher(None, compact_q, compact_name).ratio()
+        # For multi-word searches, never let one matching word (for example
+        # ``api`` in ``postman-api.txt``) make an unrelated filename rank as
+        # a strong match.  A fuzzy single-token fallback is useful only when
+        # the user actually searched for one token.
+        if len(q_tokens) == 1:
+            token_ratio = max(
+                (SequenceMatcher(None, q_tokens[0], nt).ratio()
+                 for nt in name_tokens),
+                default=0.0,
+            )
+            return max(ratio, token_ratio * 0.92)
+
+        return ratio
+
     # FIND / SEARCH FILE OR FOLDER
-    
 
     def find_item(
         self,
@@ -351,9 +483,16 @@ class FileAgent:
                 f"{location.title()} does not exist or is unavailable."
             )
 
-        query = str(query).strip().lower()
+        query = str(query).strip()
         if not query:
             raise ValueError("Search query cannot be empty.")
+
+        # If the user supplied an extension (for example .txt), do not
+        # return a different file type merely because its name is similar.
+        requested_extension = ""
+        query_path = Path(query)
+        if query_path.suffix and re.fullmatch(r"\.[A-Za-z0-9]{1,8}", query_path.suffix):
+            requested_extension = query_path.suffix.casefold()
 
         normalized_type = None
         if item_type:
@@ -364,30 +503,42 @@ class FileAgent:
                 raise ValueError("item_type must be 'file' or 'folder'.")
 
         matches = []
+        seen = set()
         try:
             for root in roots:
                 iterator = root.rglob("*") if recursive else root.iterdir()
                 for item in iterator:
                     try:
-                        if query not in item.name.lower():
-                            continue
                         if normalized_type == "file" and not item.is_file():
                             continue
                         if normalized_type == "folder" and not item.is_dir():
                             continue
+                        if requested_extension and item.is_file() and item.suffix.casefold() != requested_extension:
+                            continue
+
+                        score = self._filename_match_score(query, item.name)
+                        if score < 0.55:
+                            continue
+
+                        path_key = str(item).casefold()
+                        if path_key in seen:
+                            continue
+                        seen.add(path_key)
+
                         matches.append({
                             "name": item.name,
                             "type": "Folder" if item.is_dir() else "File",
                             "path": str(item),
+                            "score": round(score, 3),
                         })
-                        if len(matches) >= limit:
-                            return matches
                     except (PermissionError, OSError):
                         continue
         except (PermissionError, OSError):
             pass
 
-        return matches
+        # Best filename matches first, then shortest names/paths for ties.
+        matches.sort(key=lambda row: (-row["score"], len(row["name"]), row["name"].casefold()))
+        return matches[:limit]
 
     
     # FIND FILES BY EXTENSION
@@ -449,11 +600,19 @@ class FileAgent:
             root = self.get_location(normalized_location)
             roots = [root] if root.exists() else []
 
-        normalized_extension = None
+        normalized_extensions = None
         if extension:
-            normalized_extension = str(extension).lower().strip()
-            if not normalized_extension.startswith("."):
-                normalized_extension = "." + normalized_extension
+            raw_extensions = extension if isinstance(extension, (list, tuple, set)) else str(extension).replace(";", ",").split(",")
+            normalized_extensions = set()
+            for ext in raw_extensions:
+                ext = str(ext).strip().lower()
+                if not ext:
+                    continue
+                if not ext.startswith("."):
+                    ext = "." + ext
+                normalized_extensions.add(ext)
+            if not normalized_extensions:
+                normalized_extensions = None
 
         files = []
         for root in roots:
@@ -462,7 +621,7 @@ class FileAgent:
                     try:
                         if not item.is_file():
                             continue
-                        if normalized_extension and item.suffix.lower() != normalized_extension:
+                        if normalized_extensions and item.suffix.lower() not in normalized_extensions:
                             continue
                         files.append(item)
                     except (PermissionError, OSError):

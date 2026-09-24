@@ -5,7 +5,7 @@
 .venv/
 venv/
 
-# cache
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
@@ -19,6 +19,7 @@ __pycache__/
 Thumbs.db
 .DS_Store
 
+# Logs
 *.log
 
 #test file

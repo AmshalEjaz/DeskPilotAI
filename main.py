@@ -8,7 +8,6 @@ from automation.file_agent import FileAgent
 from automation.app_agent import AppAgent
 from automation.planner_agent import PlannerAgent
 from automation.tool_executor import ToolExecutor
-from automation.local_system_agent import LocalSystemAgent
 
 from PySide6.QtCore import (
     Qt,
@@ -176,12 +175,12 @@ class DeskPilotWindow(QMainWindow):
 
         self.resize(
             920,
-            660
+            800
         )
 
         self.setMinimumSize(
             800,
-            580
+            700
         )
 
         # Default theme
@@ -199,7 +198,6 @@ class DeskPilotWindow(QMainWindow):
         self.file_agent = FileAgent()
 
         self.app_agent = AppAgent()
-        self.local_system_agent = LocalSystemAgent()
 
         self.planner = PlannerAgent()
 
@@ -231,7 +229,6 @@ class DeskPilotWindow(QMainWindow):
             browser_open_callback=self.open_site,
             browser_search_callback=self.search_site,
             browser_close_callback=self.close_site,
-            local_system_agent=self.local_system_agent,
         )
 
         self.command_input.setFocus()
@@ -444,7 +441,7 @@ class DeskPilotWindow(QMainWindow):
         )
 
         self.command_input.setPlaceholderText(
-            "Try: Open and Search..."
+            "Try: Open and search..."
         )
 
         self.command_input.setMinimumHeight(
@@ -570,6 +567,9 @@ class DeskPilotWindow(QMainWindow):
             True
         )
 
+        # Give Agent Activity more vertical space.
+        self.activity_log.setMinimumHeight(340)
+
         self.activity_log.setPlaceholderText(
             "DeskPilot activity will appear here..."
         )
@@ -660,9 +660,9 @@ class DeskPilotWindow(QMainWindow):
             "●  Planning"
         )
 
-        
+        # =====================================================
         # STEP 1: ASK PLANNER TO UNDERSTAND USER LANGUAGE
-        
+        # =====================================================
 
         try:
 
@@ -711,9 +711,9 @@ class DeskPilotWindow(QMainWindow):
 
             return
 
-        
+        # =====================================================
         # STEP 2: PLANNER COULD NOT MAP COMMAND
-        
+        # =====================================================
 
         if plan.get(
             "tool"
@@ -759,9 +759,9 @@ class DeskPilotWindow(QMainWindow):
 
             return
 
-        
+        # =====================================================
         # STEP 3: EXECUTE PLANNER RESULT
-        
+        # =====================================================
 
         self.show_working_state(plan)
 
@@ -784,9 +784,9 @@ class DeskPilotWindow(QMainWindow):
 
             return
 
-        
+        # =====================================================
         # STEP 4: SHOW RESULT
-        
+        # =====================================================
 
         if isinstance(
             result,
@@ -877,6 +877,13 @@ class DeskPilotWindow(QMainWindow):
 
         
         # FILE EXPLORER → OPEN LOCATION
+        
+
+        # Examples:
+        #
+        # go to file explorer and search pictures folder
+        # open file explorer and open downloads folder
+        # go to file explorer and open documents
 
         match = re.match(
 
@@ -926,6 +933,13 @@ class DeskPilotWindow(QMainWindow):
         # OPEN LOCAL FOLDER
         
 
+        # Examples:
+        #
+        # open pictures
+        # open the pictures folder
+        # open downloads
+        # go to documents folder
+
         match = re.match(
 
             rf"^(?:open|go\s+to)"
@@ -966,6 +980,14 @@ class DeskPilotWindow(QMainWindow):
 
         
         # LIST FILES
+        
+
+        # Examples:
+        #
+        # list files in downloads
+        # show files in pictures
+        # list all files in desktop
+        # list files and folders in desktop
 
         match = re.match(
 
@@ -1056,6 +1078,11 @@ class DeskPilotWindow(QMainWindow):
         # CREATE FOLDER
         
 
+        # Examples:
+        #
+        # create folder ProjectX on desktop
+        # create a folder Test in documents
+
         match = re.match(
 
             rf"^create"
@@ -1110,6 +1137,12 @@ class DeskPilotWindow(QMainWindow):
 
         
         # CREATE FILE
+        
+
+        # Examples:
+        #
+        # create file notes.txt on desktop
+        # create a file test.txt in documents
 
         match = re.match(
 
@@ -1166,6 +1199,10 @@ class DeskPilotWindow(QMainWindow):
         
         # RENAME FILE / FOLDER
         
+
+        # Example:
+        #
+        # rename notes.txt to ideas.txt on desktop
 
         match = re.match(
 
@@ -1232,6 +1269,11 @@ class DeskPilotWindow(QMainWindow):
         
         # COPY FILE / FOLDER
         
+
+        # Example:
+        #
+        # copy notes.txt from desktop to documents
+
         match = re.match(
 
             rf"^copy\s+"
@@ -1300,6 +1342,11 @@ class DeskPilotWindow(QMainWindow):
         
         # MOVE FILE / FOLDER
         
+
+        # Example:
+        #
+        # move notes.txt from desktop to documents
+
         match = re.match(
 
             rf"^move\s+"
@@ -1398,6 +1445,12 @@ class DeskPilotWindow(QMainWindow):
         # CLOSE WEBSITE
         
 
+        # Examples:
+        #
+        # close youtube
+        # close the youtube
+        # exit github
+        # exit the bing
 
         match = re.match(
 
@@ -1431,6 +1484,11 @@ class DeskPilotWindow(QMainWindow):
         
         # OPEN WEBSITE AND SEARCH
         
+
+        # Example:
+        #
+        # open youtube and search python for beginners
+
         match = re.match(
 
             rf"^(?:open\s+)?"
@@ -1475,6 +1533,12 @@ class DeskPilotWindow(QMainWindow):
         
         # SEARCH QUERY IN / ON WEBSITE
         
+
+        # Examples:
+        #
+        # search laravel for beginners in youtube
+        # search python tutorial on youtube
+        # search AI news in bing
 
         match = re.match(
 
@@ -1521,6 +1585,12 @@ class DeskPilotWindow(QMainWindow):
         # SEARCH WEBSITE FOR QUERY
         
 
+        # Examples:
+        #
+        # search github for playwright
+        # search youtube for laravel tutorial
+        # search google for python jobs
+
         match = re.match(
 
             rf"^search\s+"
@@ -1564,6 +1634,11 @@ class DeskPilotWindow(QMainWindow):
         # WEBSITE SEARCH QUERY
         
 
+        # Examples:
+        #
+        # youtube search laravel tutorial
+        # github search playwright
+        # bing search AI news
 
         match = re.match(
 
@@ -1607,6 +1682,13 @@ class DeskPilotWindow(QMainWindow):
         
         # OPEN WEBSITE
         
+
+        # Examples:
+        #
+        # open youtube
+        # open the youtube
+        # launch github
+        # go to wikipedia
 
         match = re.match(
 
