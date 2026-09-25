@@ -9,9 +9,9 @@ from groq import Groq
 
 class PlannerAgent:
 
-    # =========================================================
+    
     # ALLOWED TOOLS
-    # =========================================================
+    
 
     ALLOWED_TOOLS = {
         "open_file_explorer",
@@ -43,21 +43,15 @@ class PlannerAgent:
         "unknown",
     }
 
-    # =========================================================
+    
     # INIT
-    # =========================================================
+    
 
     def __init__(
         self,
         model=None,
     ):
 
-        # Project root:
-        #
-        # DeskPilotAI/
-        # ├── .env
-        # └── automation/
-        #     └── planner_agent.py
 
         project_root = (
             Path(__file__)
@@ -100,9 +94,9 @@ class PlannerAgent:
             max_retries=0,
         )
 
-    # =========================================================
+    
     # SYSTEM PROMPT
-    # =========================================================
+    
 
     def _system_prompt(
         self
@@ -806,9 +800,7 @@ Return JSON only.
                     },
                 }
 
-        # ---------------------------------------------------------
         # EXTENSION + LOCATION FILE COMMANDS
-        # ---------------------------------------------------------
         # Handle commands such as:
         #   open .txt files from destop
         #   open all .txt files in desktop
@@ -987,9 +979,9 @@ Return JSON only.
 
         return plan
 
-    # =========================================================
+    
     # PLAN COMMAND
-    # =========================================================
+    
 
     def plan(
         self,
@@ -1041,9 +1033,8 @@ Return JSON only.
                 f"{error}"
             ) from error
 
-        # =====================================================
+        
         # GET CONTENT
-        # =====================================================
 
         if not response.choices:
 
@@ -1066,9 +1057,9 @@ Return JSON only.
 
         content = content.strip()
 
-        # =====================================================
+        
         # PARSE JSON
-        # =====================================================
+        
 
         try:
 
@@ -1083,19 +1074,17 @@ Return JSON only.
                 f"{content}"
             ) from error
 
-        # =====================================================
+        
         # VALIDATE PLAN
-        # =====================================================
-
+        
         plan = self._repair_common_intent(command, plan)
 
         return self._validate_plan(
             plan
         )
 
-    # =========================================================
+    
     # VALIDATE PLANNER OUTPUT
-    # =========================================================
 
     def _validate_plan(
         self,

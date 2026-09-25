@@ -657,9 +657,9 @@ class DeskPilotWindow(QMainWindow):
             "●  Planning"
         )
 
-        # =====================================================
+        
         # STEP 1: ASK PLANNER TO UNDERSTAND USER LANGUAGE
-        # =====================================================
+        
 
         try:
 
@@ -708,9 +708,9 @@ class DeskPilotWindow(QMainWindow):
 
             return
 
-        # =====================================================
+        
         # STEP 2: PLANNER COULD NOT MAP COMMAND
-        # =====================================================
+        
 
         if plan.get(
             "tool"
@@ -756,9 +756,9 @@ class DeskPilotWindow(QMainWindow):
 
             return
 
-        # =====================================================
+        
         # STEP 3: EXECUTE PLANNER RESULT
-        # =====================================================
+        
 
         self.show_working_state(plan)
 
@@ -781,9 +781,9 @@ class DeskPilotWindow(QMainWindow):
 
             return
 
-        # =====================================================
+        
         # STEP 4: SHOW RESULT
-        # =====================================================
+        
 
         if isinstance(
             result,
@@ -928,15 +928,7 @@ class DeskPilotWindow(QMainWindow):
 
         
         # OPEN LOCAL FOLDER
-        
-
-        # Examples:
-        #
-        # open pictures
-        # open the pictures folder
-        # open downloads
-        # go to documents folder
-
+    
         match = re.match(
 
             rf"^(?:open|go\s+to)"
@@ -978,13 +970,6 @@ class DeskPilotWindow(QMainWindow):
         
         # LIST FILES
         
-
-        # Examples:
-        #
-        # list files in downloads
-        # show files in pictures
-        # list all files in desktop
-        # list files and folders in desktop
 
         match = re.match(
 
@@ -1075,11 +1060,6 @@ class DeskPilotWindow(QMainWindow):
         # CREATE FOLDER
         
 
-        # Examples:
-        #
-        # create folder ProjectX on desktop
-        # create a folder Test in documents
-
         match = re.match(
 
             rf"^create"
@@ -1134,12 +1114,6 @@ class DeskPilotWindow(QMainWindow):
 
         
         # CREATE FILE
-        
-
-        # Examples:
-        #
-        # create file notes.txt on desktop
-        # create a file test.txt in documents
 
         match = re.match(
 
@@ -1196,10 +1170,6 @@ class DeskPilotWindow(QMainWindow):
         
         # RENAME FILE / FOLDER
         
-
-        # Example:
-        #
-        # rename notes.txt to ideas.txt on desktop
 
         match = re.match(
 
@@ -1265,11 +1235,6 @@ class DeskPilotWindow(QMainWindow):
 
         
         # COPY FILE / FOLDER
-        
-
-        # Example:
-        #
-        # copy notes.txt from desktop to documents
 
         match = re.match(
 
@@ -1339,10 +1304,6 @@ class DeskPilotWindow(QMainWindow):
         
         # MOVE FILE / FOLDER
         
-
-        # Example:
-        #
-        # move notes.txt from desktop to documents
 
         match = re.match(
 
@@ -1440,14 +1401,6 @@ class DeskPilotWindow(QMainWindow):
 
         
         # CLOSE WEBSITE
-        
-
-        # Examples:
-        #
-        # close youtube
-        # close the youtube
-        # exit github
-        # exit the bing
 
         match = re.match(
 
@@ -1528,11 +1481,6 @@ class DeskPilotWindow(QMainWindow):
         # SEARCH QUERY IN / ON WEBSITE
         
 
-        # Examples:
-        #
-        # search laravel for beginners in youtube
-        # search python tutorial on youtube
-        # search AI news in bing
 
         match = re.match(
 
@@ -1577,13 +1525,6 @@ class DeskPilotWindow(QMainWindow):
 
         
         # SEARCH WEBSITE FOR QUERY
-        
-
-        # Examples:
-        #
-        # search github for playwright
-        # search youtube for laravel tutorial
-        # search google for python jobs
 
         match = re.match(
 
@@ -1627,12 +1568,6 @@ class DeskPilotWindow(QMainWindow):
         
         # WEBSITE SEARCH QUERY
         
-
-        # Examples:
-        #
-        # youtube search laravel tutorial
-        # github search playwright
-        # bing search AI news
 
         match = re.match(
 

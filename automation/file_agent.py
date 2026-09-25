@@ -446,8 +446,7 @@ class FileAgent:
         compact_q = q.replace(" ", "")
         compact_name = name.replace(" ", "")
         ratio = SequenceMatcher(None, compact_q, compact_name).ratio()
-        # For multi-word searches, never let one matching word (for example
-        # ``api`` in ``postman-api.txt``) make an unrelated filename rank as
+        # For multi-word searches, never let one matching word  make an unrelated filename rank as
         # a strong match.  A fuzzy single-token fallback is useful only when
         # the user actually searched for one token.
         if len(q_tokens) == 1:
