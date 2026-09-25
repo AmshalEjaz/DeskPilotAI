@@ -754,6 +754,72 @@ Return JSON only.
             ):
                 return {"tool": "browser_open", "args": {"site": site}}
 
+        # Common local-folder opens must be handled before the generic file
+        # matcher below. Otherwise commands such as "open pictures folder"
+        # can be mistaken for a file search.
+        local_folder_locations = {
+            "desktop": "desktop",
+            "downloads": "downloads",
+            "download": "downloads",
+            "documents": "documents",
+            "document": "documents",
+            "pictures": "pictures",
+            "picture": "pictures",
+            "videos": "videos",
+            "video": "videos",
+        }
+        folder_open_match = re.match(
+            r"^(?:open|launch|go to|visit|kholo)\s+(?:the\s+)?(?P<location>desktop|downloads?|documents?|pictures?|videos?)(?:\s+folder)?$",
+            compact,
+            re.IGNORECASE,
+        )
+        if folder_open_match:
+            location = local_folder_locations[folder_open_match.group("location").lower()]
+            return {"tool": "open_folder", "args": {"location": location}}
+
+        # Extension searches must be recognized before the generic "open
+        # file" matcher. Without this, "open .txt files from desktop" can
+        # be treated as a literal filename search.
+        extension_location = (
+            r"my computer|this pc|downloads?|documents?|pictures?|desktop|"
+            r"destop|videos?|computer|pc|[A-Za-z]:(?:\s*drive)?|[A-Za-z]\s+drive|drive\s*[A-Za-z]"
+        )
+        extension_command = re.match(
+            rf"^(?P<action>open|launch|show|display|find|search|locate)\s+"
+            rf"(?P<all>all\s+)?(?:the\s+)?(?P<extension>\.?[A-Za-z0-9]{{1,8}})\s+"
+            rf"(?:files?|documents?)\s+(?:from|in|on|inside|under)\s+(?:the\s+)?"
+            rf"(?P<location>{extension_location})\s*$",
+            compact,
+            re.IGNORECASE,
+        )
+        if extension_command:
+            ext = extension_command.group("extension").strip()
+            if not ext.startswith("."):
+                ext = "." + ext
+            location = extension_command.group("location").strip()
+            location_aliases = {
+                "destop": "desktop", "desktop": "desktop",
+                "download": "downloads", "downloads": "downloads",
+                "document": "documents", "documents": "documents",
+                "picture": "pictures", "pictures": "pictures",
+                "video": "videos", "videos": "videos",
+                "computer": "computer", "pc": "computer",
+                "my pc": "computer", "my computer": "computer",
+                "this pc": "computer",
+            }
+            location = location_aliases.get(location.lower(), location)
+            if re.fullmatch(r"[A-Za-z]:?(?:\s*drive)?", location, re.IGNORECASE) or re.fullmatch(r"drive\s*[A-Za-z]", location, re.IGNORECASE):
+                location = self._normalize_command_location(location)
+            action = extension_command.group("action").lower()
+            return {
+                "tool": "find_by_extension",
+                "args": {
+                    "extension": ext,
+                    "location": location,
+                    "open_results": action in {"open", "launch"},
+                },
+            }
+
         # Files/folders/images/documents are windows, not installed apps.
         close_match = re.match(
             r"^(?:close|quit|exit|band|bnd)(?:\s+the)?\s+(.+)$",
