@@ -184,7 +184,7 @@ class DeskPilotWindow(QMainWindow):
         )
 
         # Default theme
-        self.dark_mode = False
+        self.dark_mode = True
 
         # Build UI
         self.build_ui()

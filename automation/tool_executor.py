@@ -2,9 +2,7 @@ import re
 import os
 class ToolExecutor:
 
-    # =========================================================
     # SUPPORTED TOOLS
-    # =========================================================
 
     ALLOWED_TOOLS = {
         "open_file_explorer",
@@ -36,27 +34,28 @@ class ToolExecutor:
         "browser_search",
         "browser_close",
 
+        "check_running_apps",
+        "get_window_info",
+        "open_url",
+
         "unknown",
     }
 
-    # =========================================================
     # SAFE FILE LOCATIONS
-    # =========================================================
 
     ALLOWED_LOCATIONS = {
         "desktop",
         "downloads",
         "documents",
         "pictures",
+        "videos",
     }
 
     SEARCH_LOCATIONS = {
-        "desktop", "downloads", "documents", "pictures", "computer"
+        "desktop", "downloads", "documents", "pictures", "videos", "computer"
     }
 
-    # =========================================================
     # SUPPORTED BROWSER SITES
-    # =========================================================
 
     ALLOWED_BROWSER_SITES = {
         "google",
@@ -67,9 +66,7 @@ class ToolExecutor:
         "duckduckgo",
     }
 
-    # =========================================================
     # BROWSER ALIASES
-    # =========================================================
 
     BROWSER_ALIASES = {
         "yt": "youtube",
@@ -77,9 +74,7 @@ class ToolExecutor:
         "ddg": "duckduckgo",
     }
 
-    # =========================================================
     # INIT
-    # =========================================================
 
     def __init__(
         self,
@@ -105,18 +100,16 @@ class ToolExecutor:
             browser_close_callback
         )
 
-    # =========================================================
     # MAIN EXECUTOR
-    # =========================================================
 
     def execute(
         self,
         plan
     ):
 
-        # =====================================================
+
         # VALIDATE PLAN
-        # =====================================================
+
 
         if not isinstance(
             plan,
@@ -162,9 +155,9 @@ class ToolExecutor:
             raise ValueError(
                 f"Tool '{tool}' is not allowed."
             )
-        # =====================================================
+
         # CLOSE APP
-        # =====================================================
+
 
         if tool == "close_app":
 
@@ -191,9 +184,9 @@ class ToolExecutor:
                 message=message
             )
 
-        # =====================================================
+
         # CLOSE WINDOW / FILE / FOLDER
-        # =====================================================
+
 
         if tool == "close_window":
 
@@ -204,9 +197,9 @@ class ToolExecutor:
             message = self.app_agent.close_window(target)
             return self._result(message=message)
 
-        # =====================================================
+
         # GET APP INFO
-        # =====================================================
+
 
         if tool == "get_app_info":
 
@@ -225,9 +218,9 @@ class ToolExecutor:
 
             return self._result(message=message, data=info)
 
-        # =====================================================
+
         # CHECK APP STATUS
-        # =====================================================
+
 
         if tool == "check_app_status":
 
@@ -258,9 +251,9 @@ class ToolExecutor:
                 data=status
             )
 
-        # =====================================================
+
         # COUNT IMAGES
-        # =====================================================
+
 
         if tool == "count_images":
 
@@ -312,9 +305,9 @@ class ToolExecutor:
                     "location": location,
                 }
             )
-        # =====================================================
+
         # UNKNOWN
-        # =====================================================
+
 
         if tool == "unknown":
 
@@ -328,9 +321,9 @@ class ToolExecutor:
                 message=str(reason)
             )
 
-        # =====================================================
+
         # OPEN FILE EXPLORER
-        # =====================================================
+
 
         if tool == "open_file_explorer":
 
@@ -343,9 +336,9 @@ class ToolExecutor:
                 message=message
             )
 
-        # =====================================================
+
         # OPEN THIS PC
-        # =====================================================
+
 
         if tool == "open_this_pc":
 
@@ -358,9 +351,9 @@ class ToolExecutor:
                 message=message
             )
 
-        # =====================================================
+
         # OPEN WINDOWS APP
-        # =====================================================
+
 
         if tool == "open_app":
 
@@ -385,9 +378,9 @@ class ToolExecutor:
                 message=message
             )
 
-        # =====================================================
+
         # OPEN FOLDER
-        # =====================================================
+
 
         if tool == "open_folder":
 
@@ -406,9 +399,9 @@ class ToolExecutor:
                 message=message
             )
 
-        # =====================================================
+
         # OPEN FILE / FOLDER ITEM
-        # =====================================================
+
 
         if tool == "open_item":
 
@@ -439,9 +432,9 @@ class ToolExecutor:
                 message=message
             )
 
-        # =====================================================
+
         # LIST FILES
-        # =====================================================
+
 
         if tool == "list_files":
 
@@ -466,9 +459,9 @@ class ToolExecutor:
                 data=items,
             )
 
-        # =====================================================
+
         # FIND ITEM
-        # =====================================================
+
 
         if tool == "find_item":
 
@@ -566,9 +559,9 @@ class ToolExecutor:
                 data=results,
             )
 
-        # =====================================================
+
         # FIND FILES BY EXTENSION
-        # =====================================================
+
 
         if tool == "find_by_extension":
 
@@ -658,9 +651,9 @@ class ToolExecutor:
                 data=results,
             )
 
-        # =====================================================
+
         # FIND LATEST FILE
-        # =====================================================
+
 
         if tool == "find_latest_file":
 
@@ -717,9 +710,9 @@ class ToolExecutor:
                 data=result,
             )
 
-        # =====================================================
+
         # CREATE FOLDER
-        # =====================================================
+
 
         if tool == "create_folder":
 
@@ -752,9 +745,9 @@ class ToolExecutor:
                 message=message
             )
 
-        # =====================================================
+
         # CREATE FILE
-        # =====================================================
+
 
         if tool == "create_file":
 
@@ -800,9 +793,9 @@ class ToolExecutor:
                 message=message
             )
 
-        # =====================================================
+
         # RENAME ITEM
-        # =====================================================
+
 
         if tool == "rename_item":
 
@@ -842,9 +835,9 @@ class ToolExecutor:
                 message=message
             )
 
-        # =====================================================
+
         # COPY ITEM
-        # =====================================================
+
 
         if tool == "copy_item":
 
@@ -887,9 +880,9 @@ class ToolExecutor:
                 message=message
             )
 
-        # =====================================================
+
         # MOVE ITEM
-        # =====================================================
+
 
         if tool == "move_item":
 
@@ -932,9 +925,9 @@ class ToolExecutor:
                 message=message
             )
 
-        # =====================================================
+
         # BROWSER OPEN
-        # =====================================================
+
 
         if tool == "browser_open":
 
@@ -966,9 +959,9 @@ class ToolExecutor:
                 asynchronous=True,
             )
 
-        # =====================================================
+
         # BROWSER SEARCH
-        # =====================================================
+
 
         if tool == "browser_search":
 
@@ -1007,9 +1000,9 @@ class ToolExecutor:
                 asynchronous=True,
             )
 
-        # =====================================================
+
         # BROWSER CLOSE
-        # =====================================================
+
 
         if tool == "browser_close":
 
@@ -1041,17 +1034,15 @@ class ToolExecutor:
                 asynchronous=True,
             )
 
-        # =====================================================
+
         # FALLBACK
-        # =====================================================
+
 
         raise RuntimeError(
             f"Tool '{tool}' could not be executed."
         )
 
-    # =========================================================
     # RESULT FORMAT
-    # =========================================================
 
     def _result(
         self,
@@ -1067,9 +1058,7 @@ class ToolExecutor:
             "asynchronous": asynchronous,
         }
 
-    # =========================================================
     # REQUIRED ARGUMENT CHECK
-    # =========================================================
 
     def _require(
         self,
@@ -1123,9 +1112,7 @@ class ToolExecutor:
                 )
             )
 
-    # =========================================================
     # CLEAN TEXT
-    # =========================================================
 
     def _clean_text(
         self,
@@ -1151,9 +1138,7 @@ class ToolExecutor:
 
         return value
 
-    # =========================================================
     # GET LOCATION
-    # =========================================================
 
     def _get_location(
         self,
@@ -1169,9 +1154,7 @@ class ToolExecutor:
             args["location"]
         )
 
-    # =========================================================
     # VALIDATE SEARCH LOCATION
-    # =========================================================
 
     def _validate_search_location(self, location):
         location = self._clean_text(location, "location")
@@ -1199,9 +1182,7 @@ class ToolExecutor:
             raise ValueError(f"Search location '{location}' is not currently allowed.")
         return normalized
 
-    # =========================================================
     # VALIDATE LOCATION
-    # =========================================================
 
     def _validate_location(
         self,
@@ -1247,9 +1228,7 @@ class ToolExecutor:
 
         return normalized
 
-    # =========================================================
     # VALIDATE BROWSER SITE
-    # =========================================================
 
     def _validate_site(
         self,
@@ -1282,9 +1261,7 @@ class ToolExecutor:
 
         return site
 
-    # =========================================================
     # FORMAT FILE RESULTS
-    # =========================================================
 
     def _format_items(
         self,

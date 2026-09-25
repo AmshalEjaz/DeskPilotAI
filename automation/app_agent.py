@@ -8,9 +8,9 @@ from pathlib import Path
 
 class AppAgent:
 
-    # =========================================================
+    
     # USER-FRIENDLY APP ALIASES
-    # =========================================================
+    
 
     APP_ALIASES = {
         "insta": "instagram",
@@ -34,9 +34,9 @@ class AppAgent:
         "wamp server": "wamp",
     }
 
-    # =========================================================
+    
     # COMMON EXECUTABLE APPS
-    # =========================================================
+    
 
     KNOWN_EXECUTABLES = {
         "notepad": [
@@ -90,9 +90,9 @@ class AppAgent:
         ],
     }
 
-    # =========================================================
+    
     # INIT
-    # =========================================================
+    
 
     def __init__(self):
 
@@ -104,9 +104,9 @@ class AppAgent:
             0
         )
 
-    # =========================================================
+    
     # TEXT NORMALIZATION
-    # =========================================================
+    
 
     def _normalize(
         self,
@@ -136,9 +136,9 @@ class AppAgent:
 
         return value.strip()
 
-    # =========================================================
+    
     # APP NAME NORMALIZATION
-    # =========================================================
+    
 
     def normalize_app_name(
         self,
@@ -160,9 +160,9 @@ class AppAgent:
             normalized
         )
 
-    # =========================================================
+    
     # RUN POWERSHELL
-    # =========================================================
+    
 
     def _run_powershell(
         self,
@@ -214,9 +214,9 @@ class AppAgent:
 
         return result.stdout.strip()
 
-    # =========================================================
+    
     # LOAD WINDOWS START APPS
-    # =========================================================
+    
 
     def _load_start_apps(
         self,
@@ -310,9 +310,9 @@ class AppAgent:
 
         return apps
 
-    # =========================================================
+    
     # LIST INSTALLED APPS
-    # =========================================================
+    
 
     def list_apps(
         self,
@@ -330,9 +330,9 @@ class AppAgent:
             )
         )
 
-    # =========================================================
+    
     # SEARCH INSTALLED APPS
-    # =========================================================
+    
 
     def search_apps(
         self,
@@ -384,9 +384,9 @@ class AppAgent:
 
         return matches[:limit]
 
-    # =========================================================
+    
     # FIND BEST APP
-    # =========================================================
+    
 
     def find_app(
         self,
@@ -461,9 +461,9 @@ class AppAgent:
 
         return None
 
-    # =========================================================
+    
     # FIND KNOWN EXECUTABLE PATH
-    # =========================================================
+    
 
     def _find_known_executable(
         self,
@@ -496,9 +496,9 @@ class AppAgent:
 
         return None
 
-    # =========================================================
+    
     # START MENU LOCATIONS
-    # =========================================================
+    
 
     def _get_start_menu_locations(
         self
@@ -536,9 +536,9 @@ class AppAgent:
 
         return locations
 
-    # =========================================================
+    
     # FIND START MENU SHORTCUT
-    # =========================================================
+    
 
     def _find_start_menu_shortcut(
         self,
@@ -589,9 +589,9 @@ class AppAgent:
 
         return None
 
-    # =========================================================
+    
     # RESOLVE WINDOWS SHORTCUT TARGET
-    # =========================================================
+    
 
     def _resolve_shortcut_target(
         self,
@@ -650,9 +650,9 @@ class AppAgent:
 
         return result
 
-    # =========================================================
+    
     # GET MICROSOFT STORE / APPX PACKAGE INFO
-    # =========================================================
+    
 
     def _get_appx_info(
         self,
@@ -727,9 +727,9 @@ class AppAgent:
 
         return result
 
-    # =========================================================
+    
     # GET APP INFORMATION / LOCATION
-    # =========================================================
+    
 
     def get_app_info(
         self,
@@ -932,9 +932,9 @@ class AppAgent:
 
         return result
 
-    # =========================================================
+    
     # FORMAT APP INFORMATION
-    # =========================================================
+    
 
     def format_app_info(
         self,
@@ -1062,9 +1062,9 @@ class AppAgent:
             lines
         )
 
-    # =========================================================
+    
     # OPEN KNOWN EXECUTABLE
-    # =========================================================
+    
 
     def _open_known_executable(
         self,
@@ -1093,9 +1093,9 @@ class AppAgent:
 
             return False
 
-    # =========================================================
+    
     # OPEN INSTALLED APP
-    # =========================================================
+    
 
     def open_app(
         self,
@@ -1247,9 +1247,9 @@ class AppAgent:
             f"was not found on this computer."
         )
 
-    # =========================================================
+    
     # RUNNING APP PROCESS ALIASES
-    # =========================================================
+    
 
     PROCESS_ALIASES = {
         "wps office": [
@@ -1307,9 +1307,9 @@ class AppAgent:
         ],
     }
 
-    # =========================================================
+    
     # GET RUNNING WINDOWED APPS
-    # =========================================================
+    
 
     def _get_running_apps(self):
 
@@ -1344,9 +1344,9 @@ class AppAgent:
 
         return data
 
-    # =========================================================
+    
     # CHECK WHETHER AN APP IS CURRENTLY RUNNING
-    # =========================================================
+    
 
     def check_app_status(
         self,
@@ -1401,9 +1401,9 @@ class AppAgent:
             "processes": matches,
         }
 
-    # =========================================================
+    
     # CLOSE WINDOW BY TITLE / FILE / FOLDER NAME
-    # =========================================================
+    
 
     def close_window(self, target):
         """Close a visible file, folder, image, document, or other window.
@@ -1523,9 +1523,9 @@ $closed
             f"I could not find an open window for '{requested}'."
         )
 
-    # =========================================================
+    
     # CLOSE INSTALLED / DESKTOP APP
-    # =========================================================
+    
 
     def close_app(
         self,
