@@ -886,6 +886,8 @@ class DeskPilotWindow(QMainWindow):
 
                 "pictures": "pictures",
 
+                "videos" : "videos",
+
                 "desktop": "desktop",
             }
 
