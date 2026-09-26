@@ -142,26 +142,100 @@ class LocalSystemAgent:
         raise ValueError(f"Unknown window action: {action}")
 
     def take_screenshot(self):
+        """Capture the entire Windows virtual desktop, not the DeskPilot window."""
         if os.name != "nt":
             raise RuntimeError("Screenshots are available on Windows only.")
+
+        import ctypes
+        from ctypes import wintypes
+
         desktop = Path.home() / "Desktop"
         desktop.mkdir(parents=True, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         output = desktop / f"DeskPilot_Screenshot_{stamp}.png"
-        ps = """
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-$bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
-$bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
-$g = [System.Drawing.Graphics]::FromImage($bmp)
-$g.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bmp.Size)
-$bmp.Save('__OUTPUT__', [System.Drawing.Imaging.ImageFormat]::Png)
-$g.Dispose(); $bmp.Dispose()
-""".replace("__OUTPUT__", str(output).replace("'", "''"))
-        code, out = self._powershell(ps, timeout=15)
-        if code != 0 or not output.exists():
-            raise RuntimeError(f"Screenshot failed: {out.strip() or 'Windows could not capture the screen.'}")
-        return f"Screenshot saved to {output}"
+
+        user32 = ctypes.windll.user32
+        gdi32 = ctypes.windll.gdi32
+        # SM_XVIRTUALSCREEN=76, SM_YVIRTUALSCREEN=77,
+        # SM_CXVIRTUALSCREEN=78, SM_CYVIRTUALSCREEN=79
+        left = user32.GetSystemMetrics(76)
+        top = user32.GetSystemMetrics(77)
+        width = user32.GetSystemMetrics(78)
+        height = user32.GetSystemMetrics(79)
+        if width <= 0 or height <= 0:
+            raise RuntimeError("Windows returned an invalid desktop size.")
+
+        class BITMAPINFOHEADER(ctypes.Structure):
+            _fields_ = [("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG),
+                        ("biHeight", wintypes.LONG), ("biPlanes", wintypes.WORD),
+                        ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
+                        ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG),
+                        ("biYPelsPerMeter", wintypes.LONG), ("biClrUsed", wintypes.DWORD),
+                        ("biClrImportant", wintypes.DWORD)]
+
+        class BITMAPINFO(ctypes.Structure):
+            _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", wintypes.DWORD * 3)]
+
+        SRCCOPY = 0x00CC0020
+        BI_RGB = 0
+        DIB_RGB_COLORS = 0
+
+        hdc_screen = user32.GetDC(0)
+        hdc_mem = gdi32.CreateCompatibleDC(hdc_screen)
+        hbitmap = gdi32.CreateCompatibleBitmap(hdc_screen, width, height)
+        old_bitmap = gdi32.SelectObject(hdc_mem, hbitmap)
+        try:
+            if not gdi32.BitBlt(hdc_mem, 0, 0, width, height, hdc_screen, left, top, SRCCOPY):
+                raise RuntimeError("Windows could not capture the virtual desktop.")
+
+            header = BITMAPINFOHEADER()
+            header.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+            header.biWidth = width
+            header.biHeight = -height  # top-down bitmap
+            header.biPlanes = 1
+            header.biBitCount = 32
+            header.biCompression = BI_RGB
+            info = BITMAPINFO()
+            info.bmiHeader = header
+            buffer = (ctypes.c_ubyte * (width * height * 4))()
+            copied = gdi32.GetDIBits(hdc_mem, hbitmap, 0, height, buffer, ctypes.byref(info), DIB_RGB_COLORS)
+            if copied != height:
+                raise RuntimeError("Windows could not read the captured desktop image.")
+
+            # Write the PNG directly so screenshot capture does not depend on Pillow.
+            # The captured buffer is BGRA; PNG stores scanlines as RGBA here.
+            import struct
+            import zlib
+
+            raw_bgra = bytes(buffer)
+            raw = bytearray()
+            row_bytes = width * 4
+            for y in range(height):
+                raw.append(0)  # PNG filter: None
+                row = raw_bgra[y * row_bytes:(y + 1) * row_bytes]
+                for x in range(0, row_bytes, 4):
+                    b, g, r, a = row[x:x + 4]
+                    raw.extend((r, g, b, 255))
+
+            def _png_chunk(kind, data):
+                crc = zlib.crc32(kind)
+                crc = zlib.crc32(data, crc) & 0xffffffff
+                return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", crc)
+
+            png = bytearray(b"\x89PNG\r\n\x1a\n")
+            png.extend(_png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)))
+            png.extend(_png_chunk(b"IDAT", zlib.compress(bytes(raw), 6)))
+            png.extend(_png_chunk(b"IEND", b""))
+            output.write_bytes(png)
+        finally:
+            gdi32.SelectObject(hdc_mem, old_bitmap)
+            gdi32.DeleteObject(hbitmap)
+            gdi32.DeleteDC(hdc_mem)
+            user32.ReleaseDC(0, hdc_screen)
+
+        if not output.exists():
+            raise RuntimeError("Screenshot file was not created.")
+        return f"Full desktop screenshot saved to {output}"
 
     def diagnose(self, query=""):
         q = str(query or "").strip().lower()

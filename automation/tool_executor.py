@@ -19,6 +19,7 @@ class ToolExecutor:
         "find_item",
         "find_by_extension",
         "find_latest_file",
+        "find_recent_files",
 
         "create_folder",
         "create_file",
@@ -771,6 +772,22 @@ class ToolExecutor:
                 data=result,
             )
 
+
+        # FIND FILES MODIFIED ON A DATE
+        if tool == "find_recent_files":
+            location = self._validate_search_location(args.get("location", "computer"))
+            results = self.file_agent.find_recent_files(location=location, extension=args.get("extension"), days_ago=int(args.get("days_ago", 0)), limit=int(args.get("limit", 20)))
+            import datetime as _dt
+            day_word = "Yesterday" if int(args.get("days_ago", 0)) == 1 else "Today"
+            if not results:
+                message = f"No files found modified {day_word.lower()}" + (f" in {location.title()}" if location != "computer" else " on this computer") + "."
+            else:
+                lines = [f"{day_word}'s modified files ({len(results)}):"]
+                for i, row in enumerate(results, 1):
+                    stamp = _dt.datetime.fromtimestamp(row["modified"]).strftime("%I:%M %p")
+                    lines.append(f"{i}. {row['name']} — {stamp}\n   {row['path']}")
+                message = "\n".join(lines)
+            return self._result(message=message, data=results)
 
         # CREATE FOLDER
 

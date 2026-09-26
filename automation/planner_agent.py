@@ -30,6 +30,7 @@ class PlannerAgent:
         "find_item",
         "find_by_extension",
         "find_latest_file",
+        "find_recent_files",
 
         "create_folder",
         "create_file",
@@ -519,7 +520,12 @@ Example:
 }
 
 
-10. create_folder
+10. find_recent_files
+
+Args: {"location": "desktop|downloads|documents|pictures|videos|computer", "extension": ".pdf|null", "days_ago": 1, "limit": 20}
+Use for "which PDF did I edit yesterday?", "show PDFs I modified yesterday", or "kal maine kaunsi pdf edit ki thi?". "Edited" means filesystem last-modified time.
+
+11. create_folder
 
 Args:
 
@@ -1089,6 +1095,14 @@ Return JSON only.
         # "search my resume on computer", "locate report in desktop".
         search_locations = r"my computer|this pc|downloads?|documents?|pictures?|desktop|computer|pc|[A-Za-z]:(?:\s*drive)?|[A-Za-z]\s+drive|drive\s*[A-Za-z]"
         search_words = r"find|search|look for|lookup|locate|look up|show me|show|get|dhundo|dhoondo|talash karo|search karo|find karo"
+
+        # Modified-date queries are deterministic and do not require the LLM.
+        _recent_ext = r"(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|py|js|ts|php|jpg|jpeg|png)"
+        _recent = re.search(r"(?:yesterday|last night|kal).*?(?:" + _recent_ext + r").*?(?:edited|modified)|(?:edited|modified).*?(?:yesterday|kal).*?(?:" + _recent_ext + r")", compact, re.IGNORECASE)
+        if _recent:
+            _ext = re.search(r"\b(" + _recent_ext + r")\b", compact, re.IGNORECASE)
+            ext = ("." + _ext.group(1).lower()) if _ext else None
+            return {"tool": "find_recent_files", "args": {"location": "computer", "extension": ext, "days_ago": 1, "limit": 20}}
 
         # Latest/newest image queries are deterministic. "image" is a file
         # category, not a literal filename, so route it to the latest-file

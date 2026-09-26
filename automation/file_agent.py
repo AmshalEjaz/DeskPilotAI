@@ -852,6 +852,45 @@ public static class DeskPilotRecycleBinWin32 {
         }
 
     
+    # FIND FILES BY MODIFICATION DATE
+
+    def find_recent_files(self, location="computer", extension=None, days_ago=0, limit=20):
+        """Find files modified during a local calendar day."""
+        normalized_location = self.normalize_location(location)
+        if normalized_location == "computer":
+            roots = [p for p in self.search_roots if p.exists()]
+        else:
+            base = self.get_location(normalized_location)
+            roots = [base] if base and base.exists() else []
+        if not roots:
+            return []
+        import datetime as _dt
+        target = _dt.date.today() - _dt.timedelta(days=int(days_ago))
+        start = _dt.datetime.combine(target, _dt.time.min).timestamp()
+        end = _dt.datetime.combine(target, _dt.time.max).timestamp()
+        extensions = None
+        if extension:
+            raw = extension if isinstance(extension, (list, tuple, set)) else str(extension).replace(";", ",").split(",")
+            extensions = {(str(x).strip().lower() if str(x).strip().startswith(".") else "." + str(x).strip().lower()) for x in raw if str(x).strip()}
+        skip_names = {"windows", "program files", "program files (x86)", "programdata", "$recycle.bin", "system volume information", "node_modules", ".git", "__pycache__"}
+        results, seen = [], set()
+        for root in roots:
+            try:
+                for current, dirs, files in os.walk(root, topdown=True, onerror=lambda _e: None):
+                    dirs[:] = [d for d in dirs if d.casefold() not in skip_names and not d.startswith("$")]
+                    for filename in files:
+                        try:
+                            path = Path(current) / filename
+                            key = str(path).casefold()
+                            if key in seen or (extensions and path.suffix.casefold() not in extensions): continue
+                            stat = path.stat()
+                            if start <= stat.st_mtime <= end:
+                                seen.add(key); results.append({"name": path.name, "type": "File", "path": str(path), "modified": stat.st_mtime})
+                        except (PermissionError, OSError): continue
+            except (PermissionError, OSError): continue
+        results.sort(key=lambda row: row["modified"], reverse=True)
+        return results[:int(limit)]
+
     # CREATE FOLDER
     
 
