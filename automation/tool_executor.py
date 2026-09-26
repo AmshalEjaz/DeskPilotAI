@@ -7,6 +7,7 @@ class ToolExecutor:
     ALLOWED_TOOLS = {
         "open_file_explorer",
         "open_this_pc",
+        "recycle_bin",
 
         "open_app",
 
@@ -319,6 +320,17 @@ class ToolExecutor:
 
             return self._result(
                 message=str(reason)
+            )
+
+
+        # RECYCLE BIN
+
+        if tool == "recycle_bin":
+            action = str(args.get("action", "open")).strip().lower()
+            result = self.file_agent.recycle_bin(action)
+            return self._result(
+                message=result.get("message"),
+                data={k: v for k, v in result.items() if k != "message"},
             )
 
 

@@ -224,6 +224,163 @@ class FileAgent:
     # OPEN FILE EXPLORER
     
 
+    def recycle_bin(self, action="open"):
+        """Open and/or count items in the real Windows Recycle Bin."""
+        if os.name != "nt":
+            raise RuntimeError("Recycle Bin is only available on Windows.")
+
+        action = str(action or "open").strip().lower()
+        if action not in {"open", "count", "open_and_count", "empty", "close"}:
+            raise ValueError("Unsupported Recycle Bin action.")
+
+        if action == "empty":
+            # Do not use PowerShell Clear-RecycleBin here: on some Windows
+            # configurations it resolves the virtual RecycleBin: provider
+            # incorrectly and raises "The system cannot find the path specified".
+            # SHEmptyRecycleBinW is the native Windows API for this operation.
+            import ctypes
+            flags = 0x00000001 | 0x00000002 | 0x00000004  # no confirm/progress/sound
+            rc = ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, flags)
+            if rc != 0:
+                raise RuntimeError(f"Could not empty Recycle Bin (Windows error {rc}).")
+            return {"message": "Recycle Bin emptied successfully.", "files": 0, "folders": 0, "total": 0}
+
+        if action == "close":
+            # Recycle Bin is a virtual Explorer namespace. Do not depend on the
+            # visible window title: Windows can localize/change that title.
+            # Its Shell namespace URL has a stable Recycle Bin CLSID.
+            ps = r'''
+$closed = 0
+$recycleUrl = "::{645FF040-5081-101B-9F08-00AA002F954E}"
+try {
+    $shell = New-Object -ComObject Shell.Application
+    foreach ($w in @($shell.Windows())) {
+        try {
+            $full = [string]$w.FullName
+            if ($full -notmatch '(?i)explorer\.exe$') { continue }
+
+            $url = ''
+            try { $url = [string]$w.LocationURL } catch {}
+            $loc = ''
+            try { $loc = [string]$w.LocationName } catch {}
+            $path = ''
+            try { $path = [string]$w.Document.Folder.Self.Path } catch {}
+            $name = ''
+            try { $name = [string]$w.Document.Folder.Self.Name } catch {}
+            $parsing = ''
+            try { $parsing = [string]$w.Document.Folder.Self.ParsingName } catch {}
+
+            $isRecycleBin = ($url -match '(?i)645FF040-5081-101B-9F08-00AA002F954E|RecycleBinFolder') -or
+                            ($loc -match '(?i)Recycle Bin') -or
+                            ($path -match '(?i)645FF040-5081-101B-9F08-00AA002F954E|RecycleBinFolder') -or
+                            ($name -match '(?i)Recycle Bin') -or
+                            ($parsing -match '(?i)645FF040-5081-101B-9F08-00AA002F954E|RecycleBinFolder')
+
+            if ($isRecycleBin) {
+                $hwnd = 0
+                try { $hwnd = [int64]$w.HWND } catch {}
+                if ($hwnd -ne 0) {
+                    try {
+                        if (-not ('DeskPilotRecycleClose' -as [type])) {
+                            Add-Type @"
+using System; using System.Runtime.InteropServices;
+public static class DeskPilotRecycleClose {
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+}
+"@
+                        }
+                        if ([DeskPilotRecycleClose]::IsWindow([IntPtr]$hwnd) -and [DeskPilotRecycleClose]::PostMessage([IntPtr]$hwnd,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)) { $closed++ }
+                    } catch {}
+                }
+                if ($closed -eq 0) { try { $w.Quit(); $closed++ } catch {} }
+            }
+        } catch {}
+    }
+} catch {}
+
+# Fallback: close a visible top-level window whose title identifies Recycle Bin.
+if ($closed -eq 0) {
+    Add-Type @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class DeskPilotRecycleBinWin32 {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+}
+"@
+    $WM_CLOSE = 0x0010
+    [DeskPilotRecycleBinWin32]::EnumWindows({ param($h,$l)
+        if (-not [DeskPilotRecycleBinWin32]::IsWindowVisible($h)) { return $true }
+        $sb = New-Object System.Text.StringBuilder 512
+        [void][DeskPilotRecycleBinWin32]::GetWindowText($h,$sb,$sb.Capacity)
+        $title = $sb.ToString()
+        if ($title -match '(?i)Recycle Bin') {
+            if ([DeskPilotRecycleBinWin32]::PostMessage($h,$WM_CLOSE,[IntPtr]::Zero,[IntPtr]::Zero)) { $script:closed++ }
+        }
+        return $true
+    },[IntPtr]::Zero) | Out-Null
+}
+[PSCustomObject]@{closed=$closed} | ConvertTo-Json -Compress
+'''
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout or "Unknown error").strip()
+                raise RuntimeError(f"Could not close Recycle Bin: {detail}")
+            try:
+                import json
+                data = json.loads((result.stdout or "{}").strip() or "{}")
+                closed = int(data.get("closed", 0))
+            except Exception:
+                closed = 0
+            if closed:
+                return {"message": "Recycle Bin closed successfully.", "closed": closed}
+            return {"message": "Recycle Bin is not currently open.", "closed": 0}
+
+        if action in {"open", "open_and_count"}:
+            subprocess.Popen(
+                ["explorer.exe", "shell:RecycleBinFolder"],
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+
+        if action == "open":
+            return {"message": "Recycle Bin opened successfully.", "files": 0, "folders": 0, "total": 0}
+
+        # Shell.Application namespace 10 is the Windows Recycle Bin. This avoids
+        # relying on the protected C:\$Recycle.Bin folders or user SID.
+        ps = (
+            "$shell=New-Object -ComObject Shell.Application; "
+            "$bin=$shell.Namespace(10); "
+            "$files=0; $folders=0; "
+            "if ($bin) { foreach ($item in $bin.Items()) { if ($item.IsFolder) { $folders++ } else { $files++ } } }; "
+            "[PSCustomObject]@{files=$files;folders=$folders;total=($files+$folders)} | ConvertTo-Json -Compress"
+        )
+        try:
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            raw = (result.stdout or result.stderr).strip()
+            import json
+            data = json.loads(raw) if raw else {"files": 0, "folders": 0, "total": 0}
+            files = int(data.get("files", 0)); folders = int(data.get("folders", 0)); total = int(data.get("total", files + folders))
+        except Exception as exc:
+            raise RuntimeError(f"Could not read Recycle Bin: {exc}")
+
+        return {
+            "message": f"Recycle Bin contains {total} item(s): {files} file(s) and {folders} folder(s).",
+            "files": files, "folders": folders, "total": total,
+        }
+
     def open_file_explorer(
         self
     ):

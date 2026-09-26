@@ -16,6 +16,7 @@ class PlannerAgent:
     ALLOWED_TOOLS = {
         "open_file_explorer",
         "open_this_pc",
+        "recycle_bin",
         "open_app",
         "close_app",
         "close_window",
@@ -713,6 +714,21 @@ Return JSON only.
         """Make obvious desktop intents deterministic after the LLM plan."""
         text = str(command or "").strip().lower()
         compact = re.sub(r"\s+", " ", text)
+
+        # Windows Recycle Bin is a special shell namespace, not a normal app
+        # or filesystem search target. Handle it before the LLM plan is used.
+        if re.search(r"\brecycle[ _-]?bin\b", compact, re.IGNORECASE):
+            # One dedicated Recycle Bin tool handles open, count, empty, and close.
+            # Close must be checked before the generic open fallback.
+            if re.search(r"\b(?:close|shut|exit|band|band\s+kar|band\s+karo)\b", compact, re.IGNORECASE):
+                action = "close"
+            elif re.search(r"\b(?:empty|clear|clean|delete\s+all|remove\s+all|khali|saaf)\b", compact, re.IGNORECASE):
+                action = "empty"
+            elif re.search(r"\b(?:how many|count|number of|check|files?\s+are|folders?\s+are)\b", compact, re.IGNORECASE):
+                action = "open_and_count" if re.search(r"\b(?:open|launch|kholo)\b", compact) else "count"
+            else:
+                action = "open"
+            return {"tool": "recycle_bin", "args": {"action": action}}
 
         browser_sites = {
             "google": "google",
