@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import subprocess
+import datetime
 from pathlib import Path
 
 
@@ -55,6 +56,112 @@ class LocalSystemAgent:
 
     def _which(self, name):
         return shutil.which(name)
+
+
+
+    # ------------------------------------------------------------
+    # WINDOWS / WINDOW MANAGEMENT
+    # ------------------------------------------------------------
+
+    def _enum_windows(self):
+        """Return visible top-level Windows windows with non-empty titles."""
+        if os.name != "nt":
+            return []
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        windows = []
+        EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+        def callback(hwnd, _lparam):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return True
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value.strip()
+            if not title or user32.GetParent(hwnd):
+                return True
+            windows.append({"hwnd": int(hwnd), "title": title})
+            return True
+
+        user32.EnumWindows(EnumWindowsProc(callback), 0)
+        return windows
+
+    def list_open_windows(self):
+        windows = self._enum_windows()
+        return {
+            "count": len(windows),
+            "windows": windows,
+            "message": "\n".join(
+                f"{i}. {item['title']}" for i, item in enumerate(windows, 1)
+            ) if windows else "No visible application windows were found.",
+        }
+
+    def _find_window(self, target):
+        target = str(target or "").strip().lower()
+        if not target:
+            return None
+        windows = self._enum_windows()
+        for item in windows:
+            if item["title"].lower() == target:
+                return item
+        for item in windows:
+            if target in item["title"].lower():
+                return item
+        return None
+
+    def control_window(self, target, action="activate"):
+        if os.name != "nt":
+            raise RuntimeError("Window controls are available on Windows only.")
+        import ctypes
+        user32 = ctypes.windll.user32
+        action = str(action or "activate").strip().lower()
+        if action == "minimize_all":
+            for item in self._enum_windows():
+                user32.ShowWindow(item["hwnd"], 6)
+            return "All visible windows were minimized."
+        if action == "restore_all":
+            for item in self._enum_windows():
+                user32.ShowWindow(item["hwnd"], 9)
+            return "All visible windows were restored."
+        item = self._find_window(target)
+        if not item:
+            raise ValueError(f"I could not find an open window for '{target}'.")
+        hwnd = item["hwnd"]
+        actions = {"minimize": 6, "maximize": 3, "restore": 9}
+        if action in actions:
+            user32.ShowWindow(hwnd, actions[action])
+            return f"{item['title']} {action}d successfully."
+        if action in {"activate", "switch", "focus"}:
+            user32.ShowWindow(hwnd, 9)
+            user32.SetForegroundWindow(hwnd)
+            return f"Switched to {item['title']}."
+        raise ValueError(f"Unknown window action: {action}")
+
+    def take_screenshot(self):
+        if os.name != "nt":
+            raise RuntimeError("Screenshots are available on Windows only.")
+        desktop = Path.home() / "Desktop"
+        desktop.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        output = desktop / f"DeskPilot_Screenshot_{stamp}.png"
+        ps = """
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+$bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bmp.Size)
+$bmp.Save('__OUTPUT__', [System.Drawing.Imaging.ImageFormat]::Png)
+$g.Dispose(); $bmp.Dispose()
+""".replace("__OUTPUT__", str(output).replace("'", "''"))
+        code, out = self._powershell(ps, timeout=15)
+        if code != 0 or not output.exists():
+            raise RuntimeError(f"Screenshot failed: {out.strip() or 'Windows could not capture the screen.'}")
+        return f"Screenshot saved to {output}"
 
     def diagnose(self, query=""):
         q = str(query or "").strip().lower()

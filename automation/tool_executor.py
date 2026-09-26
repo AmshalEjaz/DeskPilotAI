@@ -1,5 +1,7 @@
 import re
 import os
+
+from .local_system_agent import LocalSystemAgent
 class ToolExecutor:
 
     # SUPPORTED TOOLS
@@ -37,6 +39,10 @@ class ToolExecutor:
 
         "check_running_apps",
         "get_window_info",
+        "window_control",
+        "minimize_all_windows",
+        "restore_all_windows",
+        "take_screenshot",
         "open_url",
 
         "unknown",
@@ -88,6 +94,8 @@ class ToolExecutor:
 
         self.file_agent = file_agent
         self.app_agent = app_agent
+        self.system_agent = LocalSystemAgent()
+        self.system_agent = LocalSystemAgent()
 
         self.browser_open_callback = (
             browser_open_callback
@@ -150,12 +158,53 @@ class ToolExecutor:
             )
 
         tool = tool.strip()
+        tool_aliases = {
+            "screenshot": "take_screenshot",
+            "screen_shot": "take_screenshot",
+            "screen-shot": "take_screenshot",
+            "minimize_all": "minimize_all_windows",
+            "restore_all": "restore_all_windows",
+        }
+        tool = tool_aliases.get(tool.lower(), tool)
 
         if tool not in self.ALLOWED_TOOLS:
 
             raise ValueError(
                 f"Tool '{tool}' is not allowed."
             )
+
+        # WINDOW / SYSTEM CONTROLS
+
+        if tool == "check_running_apps":
+            data = self.system_agent.list_open_windows()
+            return self._result(message=data["message"], data=data)
+
+        if tool == "get_window_info":
+            target = args.get("target") or args.get("name")
+            if not target:
+                raise ValueError("Window name is required.")
+            item = self.system_agent._find_window(target)
+            if not item:
+                raise ValueError(f"I could not find an open window for '{target}'.")
+            return self._result(message=f"{item['title']} is open.", data=item)
+
+        if tool == "window_control":
+            action = str(args.get("action", "activate")).strip().lower()
+            target = args.get("target") or args.get("name")
+            if action not in {"minimize", "maximize", "restore", "activate", "switch", "focus"}:
+                raise ValueError("Unsupported window action.")
+            if not target:
+                raise ValueError("Window name is required.")
+            return self._result(message=self.system_agent.control_window(target, action))
+
+        if tool == "minimize_all_windows":
+            return self._result(message=self.system_agent.control_window(None, "minimize_all"))
+
+        if tool == "restore_all_windows":
+            return self._result(message=self.system_agent.control_window(None, "restore_all"))
+
+        if tool == "take_screenshot":
+            return self._result(message=self.system_agent.take_screenshot())
 
         # CLOSE APP
 
@@ -538,7 +587,7 @@ class ToolExecutor:
             if results and args.get("open_result") is True:
                 selected = results[0]
                 selected_path = selected.get("path")
-                if selected_path and os.path.isfile(selected_path):
+                if selected_path and os.path.exists(selected_path):
                     os.startfile(selected_path)
                     return self._result(
                         message=(
@@ -937,6 +986,16 @@ class ToolExecutor:
                 message=message
             )
 
+
+        # DIRECT URL
+
+        if tool == "open_url":
+            url = self._clean_text(args.get("url"), "url")
+            if not re.match(r"^https?://", url, re.IGNORECASE):
+                raise ValueError("Only http:// and https:// URLs are allowed.")
+            import webbrowser
+            webbrowser.open(url, new=2)
+            return self._result(message=f"Opened {url}")
 
         # BROWSER OPEN
 

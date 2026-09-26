@@ -40,6 +40,13 @@ class PlannerAgent:
         "browser_open",
         "browser_search",
         "browser_close",
+        "check_running_apps",
+        "get_window_info",
+        "window_control",
+        "minimize_all_windows",
+        "restore_all_windows",
+        "take_screenshot",
+        "open_url",
 
         "unknown",
     }
@@ -653,7 +660,82 @@ Example:
 }
 
 
-18. unknown
+18. check_running_apps
+
+Args:
+
+{}
+
+Use when the user asks to show/list currently open windows.
+Examples: "show open windows", "open windows dikhao", "which windows are open".
+
+
+19. get_window_info
+
+Args:
+
+{
+    "target": "window name"
+}
+
+Use when the user asks whether a particular visible window is open.
+
+
+20. window_control
+
+Args:
+
+{
+    "target": "window name",
+    "action": "minimize|maximize|restore|activate"
+}
+
+Use for commands such as:
+"minimize DeskPilot AI"
+"maximize Chrome"
+"restore Notepad"
+"switch to Chrome"
+
+
+21. minimize_all_windows
+
+Args:
+
+{}
+
+Use for "minimize all windows" / "sab windows minimize karo".
+
+
+22. restore_all_windows
+
+Args:
+
+{}
+
+Use for "restore all windows".
+
+
+23. take_screenshot
+
+Args:
+
+{}
+
+Use for "take a screenshot" / "screen shot le lo".
+
+
+24. open_url
+
+Args:
+
+{
+    "url": "https://example.com"
+}
+
+Use when the user provides a direct http/https URL and asks to open it.
+
+
+25. unknown
 
 Args:
 
@@ -715,6 +797,41 @@ Return JSON only.
         text = str(command or "").strip().lower()
         compact = re.sub(r"\s+", " ", text)
 
+        # Direct URL opens should never fall through to file search.
+        url_match = re.search(r"https?://\S+", compact, re.IGNORECASE)
+        if url_match and re.search(r"\b(?:open|launch|visit|go to)\b", compact, re.IGNORECASE):
+            return {"tool": "open_url", "args": {"url": url_match.group(0).rstrip(".,)\"'")}}
+
+        # Window commands must be recognized before generic file search.
+        if (re.search(r"\b(?:show|list|display|which|what)\b.*\b(?:open|opened|running)\s+windows?\b", compact, re.IGNORECASE)
+                or re.search(r"\b(?:open|running)\s+windows?\b", compact, re.IGNORECASE)
+                or re.search(r"\bwindows?\s+(?:open|opened|running)\b", compact, re.IGNORECASE)):
+
+            return {"tool": "check_running_apps", "args": {}}
+
+        # Common window actions are deterministic so they cannot fall through
+        # to filename search (e.g. "show open windows").
+        if re.search(r"\b(?:minimi[sz]e|minimiza|minimizar)\s+all\s+windows?\b|\bsab\s+windows?\s+(?:minimi[sz]e|chhoti)", compact, re.IGNORECASE):
+            return {"tool": "minimize_all_windows", "args": {}}
+        if re.search(r"\brestore\s+all\s+windows?\b|\bsab\s+windows?\s+(?:restore|wapas)", compact, re.IGNORECASE):
+            return {"tool": "restore_all_windows", "args": {}}
+        if re.search(r"\b(?:take|capture|make)\s+(?:a\s+)?screen\s*shot\b|\bscreen\s*shot\s+(?:le|lo|banao|do)", compact, re.IGNORECASE):
+            return {"tool": "take_screenshot", "args": {}}
+
+        window_action = re.search(
+            r"\b(?P<action>minimi[sz]e|minimiza|minimizar|maximi[sz]e|maximiza|restore|switch|activate|focus)\s+(?:the\s+)?(?P<target>.+?)\s*$",
+            compact,
+            re.IGNORECASE,
+        )
+        if window_action and "window" not in window_action.group("target"):
+            action = window_action.group("action").lower()
+            action = "minimize" if action.startswith(("minimi", "minimiza", "minimizar")) else "maximize" if action.startswith(("maximi", "maximiza")) else action
+            target = re.sub(r"^\s*(?:to|the)\s+", "", window_action.group("target").strip(), flags=re.IGNORECASE)
+            target = re.sub(r"\s+(?:window|app|application)$", "", target, flags=re.IGNORECASE)
+            # Do not steal explicit application-close/open commands.
+            if not re.match(r"^(?:open|launch|close|quit|exit)\b", target, re.IGNORECASE):
+                return {"tool": "window_control", "args": {"target": target, "action": action}}
+
         # Windows Recycle Bin is a special shell namespace, not a normal app
         # or filesystem search target. Handle it before the LLM plan is used.
         if re.search(r"\brecycle[ _-]?bin\b", compact, re.IGNORECASE):
@@ -769,6 +886,35 @@ Return JSON only.
                 re.IGNORECASE,
             ):
                 return {"tool": "browser_open", "args": {"site": site}}
+
+        # Compound natural-language folder + item commands.
+        # Examples: "go to Documents folder and open Laravel Notes" and
+        # common typos such as "do to document folder and open intelgs".
+        compound_open = re.match(
+            r"^(?:go|do|open|visit)\s+(?:to\s+)?(?:the\s+)?"
+            r"(?P<location>desktop|downloads?|documents?|pictures?|videos?)"
+            r"(?:\s+folder)?\s+and\s+(?:open|launch|start|kholo)\s+"
+            r"(?:the\s+)?(?P<query>.+?)\s*$",
+            compact,
+            re.IGNORECASE,
+        )
+        if compound_open:
+            location = {
+                "download": "downloads", "downloads": "downloads",
+                "document": "documents", "documents": "documents",
+                "picture": "pictures", "pictures": "pictures",
+                "video": "videos", "videos": "videos",
+                "desktop": "desktop",
+            }[compound_open.group("location").lower()]
+            return {
+                "tool": "find_item",
+                "args": {
+                    "query": compound_open.group("query").strip(),
+                    "location": location,
+                    "item_type": None,
+                    "open_result": True,
+                },
+            }
 
         # Common local-folder opens must be handled before the generic file
         # matcher below. Otherwise commands such as "open pictures folder"
@@ -1065,6 +1211,10 @@ Return JSON only.
     # PLAN COMMAND
     
 
+    def _deterministic_plan(self, command):
+        """Resolve common desktop intents without depending on the LLM."""
+        return self._repair_common_intent(command, {"tool": "unknown", "args": {}})
+
     def plan(
         self,
         command
@@ -1079,6 +1229,13 @@ Return JSON only.
             raise ValueError(
                 "Command cannot be empty."
             )
+
+        # Resolve common Windows commands before Groq. This makes basic
+        # natural-language automation reliable even if the AI planner is
+        # unavailable or returns an imperfect tool.
+        deterministic = self._deterministic_plan(command)
+        if deterministic.get("tool") != "unknown":
+            return self._validate_plan(deterministic)
 
         try:
 

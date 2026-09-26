@@ -7,6 +7,40 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 
+def _windows_known_folder(name):
+    """Resolve Windows Known Folders, including redirected/OneDrive Documents."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        ids = {
+            "Desktop": "B4BFCC3A-DB2C-424C-B029-7FE99A87C641",
+            "Documents": "FDD39AD0-238F-46AF-ADB4-6C85480369C7",
+            "Downloads": "374DE290-123F-4565-9164-39C4925E467B",
+            "Pictures": "33E28130-4E1E-4676-835A-98395C3BC3BB",
+            "Videos": "18989B1D-99B5-455B-841C-AB7C74E4DDFC",
+        }
+        guid = ids.get(name)
+        if not guid:
+            return None
+        class GUID(ctypes.Structure):
+            _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD), ("Data3", wintypes.WORD), ("Data4", wintypes.BYTE * 8)]
+        import uuid
+        u = uuid.UUID(guid)
+        g = GUID(u.fields[0], u.fields[1], u.fields[2], (wintypes.BYTE * 8)(*u.bytes[8:]))
+        ppath = ctypes.c_wchar_p()
+        hr = ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(g), 0, None, ctypes.byref(ppath))
+        if hr == 0 and ppath.value:
+            path = Path(ppath.value)
+            ctypes.windll.ole32.CoTaskMemFree(ppath)
+            if path.exists():
+                return path
+    except Exception:
+        pass
+    return None
+
+
 class FileAgent:
 
     def __init__(self):
@@ -29,11 +63,16 @@ class FileAgent:
             "Pictures"
         )
 
+        self.videos = self._find_folder(
+            "Videos"
+        )
+
         self.allowed_locations = {
             "desktop": self.desktop,
             "downloads": self.downloads,
             "documents": self.documents,
             "pictures": self.pictures,
+            "videos": self.videos,
         }
 
         # Searches labeled as "computer/PC" cover all available Windows
@@ -59,7 +98,7 @@ class FileAgent:
         # Fallback for unusual Windows environments where drive-root probing
         # is unavailable.
         if not unique:
-            for path in (self.pictures, self.desktop, self.downloads, self.documents):
+            for path in (self.pictures, self.desktop, self.downloads, self.documents, self.videos):
                 if path and path.exists():
                     key = str(path).casefold()
                     if key not in seen:
@@ -75,25 +114,23 @@ class FileAgent:
         folder_name
     ):
 
-        normal_path = (
-            self.home
-            / folder_name
-        )
+        # Windows Known Folder API is the source of truth. It handles
+        # OneDrive/redirection/custom Documents locations correctly.
+        known = _windows_known_folder(folder_name)
+        if known is not None:
+            return known
 
-        if normal_path.exists():
-            return normal_path
-
-        # OneDrive redirected folders
-        onedrive_path = (
-            self.home
-            / "OneDrive"
-            / folder_name
-        )
-
-        if onedrive_path.exists():
-            return onedrive_path
-
-        return normal_path
+        candidates = [
+            self.home / folder_name,
+            self.home / "OneDrive" / folder_name,
+        ]
+        # Some machines use a tenant-specific OneDrive folder.
+        for candidate in self.home.glob("OneDrive*" + os.sep + folder_name):
+            candidates.append(candidate)
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return candidates[0]
 
     
     # NORMALIZE LOCATION
@@ -467,18 +504,29 @@ public static class DeskPilotRecycleBinWin32 {
         )
 
         if not item_path.exists():
-
-            raise FileNotFoundError(
-                f"'{item_name}' was not found "
-                f"in {location.title()}."
+            # Allow human-friendly names without extensions and approximate
+            # spelling by searching the requested folder recursively.
+            matches = self.find_item(
+                query=item_name,
+                location=location,
+                item_type=None,
+                recursive=True,
+                limit=10,
             )
+            if matches:
+                item_path = Path(matches[0]["path"])
+            else:
+                raise FileNotFoundError(
+                    f"'{item_name}' was not found "
+                    f"in {location.title()}."
+                )
 
         os.startfile(
             str(item_path)
         )
 
         return (
-            f"'{item_name}' opened successfully."
+            f"'{item_path.name}' opened successfully."
         )
 
     
@@ -576,6 +624,13 @@ public static class DeskPilotRecycleBinWin32 {
             return 1.0
         if q in name:
             return 0.96
+        # Compare against filename stem so "Laravel Notes" matches
+        # "Laravel Notes.pdf", "Laravel Notes.txt" and "Laravel Notes.lnk".
+        stem = cls._search_text(Path(str(filename)).stem)
+        if q == stem:
+            return 0.99
+        if q in stem:
+            return 0.97
 
         q_tokens, expanded = cls._query_tokens(query)
         name_tokens = name.split()

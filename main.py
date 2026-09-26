@@ -829,6 +829,35 @@ class DeskPilotWindow(QMainWindow):
 
         original = command.strip()
 
+        # Deterministic desktop shortcuts. These do not depend on the AI planner.
+        _quick = original.lower()
+        if re.search(r"\b(?:take|capture)\s+(?:a\s+)?screen\s*shot\b|\bscreenshot\b", _quick):
+            try:
+                result = self.tool_executor.execute("take_screenshot", {})
+                self.add_agent_message(result.get("message", str(result)))
+            except Exception as error:
+                self.add_agent_message(f"Action failed: {error}")
+            self.set_status_ready(); return True
+        if re.search(r"\b(?:minimi[sz]e)\s+all\s+windows\b", _quick):
+            try:
+                result = self.tool_executor.execute("minimize_all_windows", {})
+                self.add_agent_message(result.get("message", str(result)))
+            except Exception as error:
+                self.add_agent_message(f"Action failed: {error}")
+            self.set_status_ready(); return True
+        m_quick = re.match(r"^\s*(minimi[sz]e|maximize|restore|switch to|activate)\s+(.+?)\s*$", original, re.I)
+        if m_quick:
+            word = m_quick.group(1).lower()
+            action = "activate" if word in {"switch to", "activate"} else ("minimize" if word.startswith("minimi") else word)
+            target = m_quick.group(2).strip()
+            try:
+                result = self.tool_executor.execute("window_control", {"action": action, "target": target})
+                self.add_agent_message(result.get("message", str(result)))
+            except Exception as error:
+                self.add_agent_message(f"Action failed: {error}")
+            self.set_status_ready(); return True
+
+
         
         # FILE LOCATION NORMALIZER
         
@@ -864,6 +893,22 @@ class DeskPilotWindow(QMainWindow):
                 location,
                 location
             )
+
+
+        # Natural-language local open: "go to Documents folder and open Laravel Notes".
+        _open_match = re.match(
+            rf"^(?:go\s+to|open|navigate\s+to)(?:\s+the)?\s+(?P<loc>{location_pattern})(?:\s+folder)?\s+(?:and\s+)?(?:open|launch)\s+(?P<item>.+?)\s*$",
+            original, re.I
+        )
+        if _open_match:
+            _loc = normalize_location(_open_match.group("loc"))
+            _item = re.sub(r"\s+(?:file|folder)$", "", _open_match.group("item").strip(), flags=re.I).strip()
+            try:
+                result = self.file_agent.open_item(_item, _loc)
+                self.add_agent_message(result)
+            except Exception as error:
+                self.add_agent_message(str(error))
+            self.set_status_ready(); return True
 
         location_pattern = (
             r"desktop|"
