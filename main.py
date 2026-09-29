@@ -1814,7 +1814,7 @@ class DeskPilotWindow(QMainWindow):
         tool = str(plan.get("tool", "")).lower()
         args = plan.get("args") or {}
 
-        if tool in {"find_item", "find_by_extension", "find_latest_file"}:
+        if tool in {"find_item", "find_by_extension", "find_latest_file", "find_recent_files"}:
             query = args.get("query") or args.get("extension") or "files"
             location = args.get("location") or "computer"
             self.status_label.setText("●  Searching")
@@ -1850,6 +1850,8 @@ class DeskPilotWindow(QMainWindow):
                 heading = f"Found {len(data)} matching file{'s' if len(data) != 1 else ''}"
             elif tool == "find_item":
                 heading = f"Found {len(data)} matching item{'s' if len(data) != 1 else ''}"
+            elif tool == "find_recent_files":
+                heading = f"Modified files ({len(data)})"
             else:
                 heading = "Results"
 

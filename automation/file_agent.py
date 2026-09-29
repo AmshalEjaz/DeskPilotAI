@@ -95,6 +95,14 @@ class FileAgent:
 
         unique = []
         seen = set()
+
+        # De-duplicate the discovered drive roots.
+        for path in roots:
+            key = str(path).casefold()
+            if key not in seen:
+                seen.add(key)
+                unique.append(path)
+
         # Fallback for unusual Windows environments where drive-root probing
         # is unavailable.
         if not unique:
@@ -104,6 +112,7 @@ class FileAgent:
                     if key not in seen:
                         seen.add(key)
                         unique.append(path)
+
         return unique
 
     # FIND WINDOWS USER FOLDER
@@ -872,12 +881,21 @@ public static class DeskPilotRecycleBinWin32 {
         if extension:
             raw = extension if isinstance(extension, (list, tuple, set)) else str(extension).replace(";", ",").split(",")
             extensions = {(str(x).strip().lower() if str(x).strip().startswith(".") else "." + str(x).strip().lower()) for x in raw if str(x).strip()}
-        skip_names = {"windows", "program files", "program files (x86)", "programdata", "$recycle.bin", "system volume information", "node_modules", ".git", "__pycache__"}
+        skip_names = {
+            "windows", "program files", "program files (x86)", "programdata",
+            "$recycle.bin", "system volume information", "recovery",
+            "node_modules", ".git", "__pycache__", "appdata"
+        }
         results, seen = [], set()
         for root in roots:
             try:
                 for current, dirs, files in os.walk(root, topdown=True, onerror=lambda _e: None):
-                    dirs[:] = [d for d in dirs if d.casefold() not in skip_names and not d.startswith("$")]
+                    # Avoid Windows/system caches and dependency trees that can
+                    # contain thousands of irrelevant files.
+                    dirs[:] = [
+                        d for d in dirs
+                        if d.casefold() not in skip_names and not d.startswith("$")
+                    ]
                     for filename in files:
                         try:
                             path = Path(current) / filename

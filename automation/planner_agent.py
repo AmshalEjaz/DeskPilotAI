@@ -1097,12 +1097,36 @@ Return JSON only.
         search_words = r"find|search|look for|lookup|locate|look up|show me|show|get|dhundo|dhoondo|talash karo|search karo|find karo"
 
         # Modified-date queries are deterministic and do not require the LLM.
-        _recent_ext = r"(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|py|js|ts|php|jpg|jpeg|png)"
-        _recent = re.search(r"(?:yesterday|last night|kal).*?(?:" + _recent_ext + r").*?(?:edited|modified)|(?:edited|modified).*?(?:yesterday|kal).*?(?:" + _recent_ext + r")", compact, re.IGNORECASE)
-        if _recent:
+        # Match the intent regardless of word order:
+        # "which PDF did I edit yesterday?",
+        # "show PDFs I modified yesterday",
+        # "kal maine kaunsi pdf edit ki thi?"
+        _recent_ext = r"(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|py|js|ts|php|jpg|jpeg|png)s?"
+        _recent_action = r"(?:edit\w*|modif\w*)"
+        _recent_day = r"(?:today|yesterday|last night|kal|aaj)"
+        _has_recent_file = re.search(r"\b" + _recent_ext + r"\b", compact, re.IGNORECASE)
+        _has_recent_action = re.search(_recent_action, compact, re.IGNORECASE)
+        _day_match = re.search(_recent_day, compact, re.IGNORECASE)
+
+        if _has_recent_file and _has_recent_action and _day_match:
             _ext = re.search(r"\b(" + _recent_ext + r")\b", compact, re.IGNORECASE)
             ext = ("." + _ext.group(1).lower()) if _ext else None
-            return {"tool": "find_recent_files", "args": {"location": "computer", "extension": ext, "days_ago": 1, "limit": 20}}
+            if ext and ext.endswith("s") and ext[:-1] in {
+                ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+                ".txt", ".csv", ".zip", ".py", ".php", ".jpg", ".jpeg", ".png"
+            }:
+                ext = ext[:-1]
+            day_word = _day_match.group(0).lower()
+            days_ago = 0 if day_word in {"today", "aaj"} else 1
+            return {
+                "tool": "find_recent_files",
+                "args": {
+                    "location": "computer",
+                    "extension": ext,
+                    "days_ago": days_ago,
+                    "limit": 20,
+                },
+            }
 
         # Latest/newest image queries are deterministic. "image" is a file
         # category, not a literal filename, so route it to the latest-file
