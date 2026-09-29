@@ -81,38 +81,22 @@ class FileAgent:
 
     
     def _build_search_roots(self):
-        roots = []
+        """Build small, non-overlapping user roots for fast searches.
 
-        # Include every available Windows drive (C:, D:, E:, ...).
-        # This makes "find ... in computer" genuinely mean the PC.
-        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-            drive = Path(f"{letter}:\\")
+        Do not include Path.home(): Desktop/Documents/etc. already live under
+        the user profile, and recursively scanning the whole profile causes
+        duplicate work and makes the UI appear frozen.
+        """
+        candidates = [self.desktop, self.documents, self.downloads, self.pictures, self.videos]
+        unique, seen = [], set()
+        for path in candidates:
             try:
-                if drive.exists():
-                    roots.append(drive)
-            except OSError:
-                continue
-
-        unique = []
-        seen = set()
-
-        # De-duplicate the discovered drive roots.
-        for path in roots:
-            key = str(path).casefold()
-            if key not in seen:
-                seen.add(key)
-                unique.append(path)
-
-        # Fallback for unusual Windows environments where drive-root probing
-        # is unavailable.
-        if not unique:
-            for path in (self.pictures, self.desktop, self.downloads, self.documents, self.videos):
-                if path and path.exists():
-                    key = str(path).casefold()
+                if path and path.exists() and path.is_dir():
+                    key = str(path.resolve()).casefold()
                     if key not in seen:
-                        seen.add(key)
-                        unique.append(path)
-
+                        seen.add(key); unique.append(path)
+            except (OSError, RuntimeError):
+                continue
         return unique
 
     # FIND WINDOWS USER FOLDER
@@ -507,26 +491,38 @@ public static class DeskPilotRecycleBinWin32 {
             location
         )
 
+        original_query = str(item_name or "").strip()
+        search_query = self._clean_filename_query(original_query)
+        requested_extension = None
+        descriptor_ext = re.search(
+            r"\b(pdf|txt|docx|xlsx|pptx|csv|jpg|jpeg|png|gif|webp|bmp|svg)\b",
+            original_query,
+            re.IGNORECASE,
+        )
+        if descriptor_ext:
+            requested_extension = "." + descriptor_ext.group(1).lower()
+
         item_path = self._safe_child(
             base_folder,
-            item_name
+            search_query
         )
 
         if not item_path.exists():
-            # Allow human-friendly names without extensions and approximate
-            # spelling by searching the requested folder recursively.
+            # Human-friendly names are searched, but only a strong filename
+            # match may be opened. Never open a weak/fuzzy unrelated result.
             matches = self.find_item(
-                query=item_name,
+                query=search_query,
                 location=location,
-                item_type=None,
+                item_type="file" if requested_extension else None,
                 recursive=True,
                 limit=10,
+                requested_extension=requested_extension,
             )
             if matches:
                 item_path = Path(matches[0]["path"])
             else:
                 raise FileNotFoundError(
-                    f"'{item_name}' was not found "
+                    f"'{search_query}' was not found "
                     f"in {location.title()}."
                 )
 
@@ -592,6 +588,16 @@ public static class DeskPilotRecycleBinWin32 {
         return re.sub(r"\s+", " ", value).strip()
 
     @classmethod
+    def _clean_filename_query(cls, query):
+        """Strip natural-language file descriptors from a filename query."""
+        text = str(query or "").strip()
+        # Examples: "PDF named Amshal CV", "file named report.pdf",
+        # "the PDF called Amshal CV" -> the actual filename query.
+        text = re.sub(r"\b(?:the\s+)?(?:file|folder|document|pdf|txt|docx|xlsx|pptx|csv|jpg|jpeg|png|image|photo)\s+(?:named|called)\s+", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(?:named|called)\s+", "", text, flags=re.IGNORECASE)
+        return text.strip()
+
+    @classmethod
     def _query_tokens(cls, query):
         """Turn a natural search phrase into useful filename terms."""
         text = cls._search_text(query)
@@ -599,7 +605,7 @@ public static class DeskPilotRecycleBinWin32 {
             "find", "search", "look", "lookup", "locate", "show",
             "get", "open", "where", "is", "my", "me", "please",
             "file", "files", "folder", "folders", "item", "items",
-            "document", "documents",
+            "document", "documents", "named", "called",
         }
         tokens = [t for t in text.split() if t not in filler]
 
@@ -678,7 +684,30 @@ public static class DeskPilotRecycleBinWin32 {
             )
             return max(ratio, token_ratio * 0.92)
 
-        return ratio
+        # Multi-word filename requests require all concepts to participate;
+        # never let a weak overall fuzzy ratio select an unrelated file.
+        return ratio if min(concept_scores or [0.0]) >= 0.78 else 0.0
+
+    _SEARCH_SKIP_DIRS = {
+        "appdata", "node_modules", ".git", "__pycache__", ".venv", "venv",
+        "packages", "package cache", "$recycle.bin", "system volume information",
+    }
+
+    def _iter_search_items(self, root, include_dirs=True):
+        """Fast recursive iterator that prunes noisy directories."""
+        if not root or not root.exists():
+            return
+        for current, dirs, files in os.walk(root, topdown=True, onerror=lambda _e: None):
+            dirs[:] = [
+                d for d in dirs
+                if d.casefold() not in self._SEARCH_SKIP_DIRS and not d.startswith("$")
+            ]
+            base = Path(current)
+            if include_dirs:
+                for name in dirs:
+                    yield base / name
+            for name in files:
+                yield base / name
 
     # FIND / SEARCH FILE OR FOLDER
 
@@ -688,7 +717,8 @@ public static class DeskPilotRecycleBinWin32 {
         location,
         item_type=None,
         recursive=True,
-        limit=50
+        limit=50,
+        requested_extension=None
     ):
 
         normalized_location = self.normalize_location(location)
@@ -703,13 +733,13 @@ public static class DeskPilotRecycleBinWin32 {
                 f"{location.title()} does not exist or is unavailable."
             )
 
-        query = str(query).strip()
+        query = self._clean_filename_query(str(query).strip())
         if not query:
             raise ValueError("Search query cannot be empty.")
 
-        # If the user supplied an extension (for example .txt), do not
-        # return a different file type merely because its name is similar.
-        requested_extension = ""
+        # If the caller already identified an extension (for example "PDF named
+        # Amshal CV"), enforce it so a similarly named HTML/other file cannot win.
+        requested_extension = (str(requested_extension).strip().casefold() if requested_extension else "")
         query_path = Path(query)
         if query_path.suffix and re.fullmatch(r"\.[A-Za-z0-9]{1,8}", query_path.suffix):
             requested_extension = query_path.suffix.casefold()
@@ -726,7 +756,7 @@ public static class DeskPilotRecycleBinWin32 {
         seen = set()
         try:
             for root in roots:
-                iterator = root.rglob("*") if recursive else root.iterdir()
+                iterator = self._iter_search_items(root, include_dirs=True) if recursive else root.iterdir()
                 for item in iterator:
                     try:
                         if normalized_type == "file" and not item.is_file():
@@ -751,6 +781,11 @@ public static class DeskPilotRecycleBinWin32 {
                             "path": str(item),
                             "score": round(score, 3),
                         })
+                        # A strong filename match is safe to return immediately.
+                        # This avoids scanning thousands of unrelated files after
+                        # finding the requested document.
+                        if score >= 0.96 and (not requested_extension or item.suffix.casefold() == requested_extension):
+                            return matches[-1:]
                     except (PermissionError, OSError):
                         continue
         except (PermissionError, OSError):
@@ -785,7 +820,7 @@ public static class DeskPilotRecycleBinWin32 {
         results = []
         try:
             for root in roots:
-                iterator = root.rglob("*") if recursive else root.iterdir()
+                iterator = self._iter_search_items(root, include_dirs=False) if recursive else root.iterdir()
                 for item in iterator:
                     try:
                         if not item.is_file() or item.suffix.lower() != extension:
@@ -834,37 +869,38 @@ public static class DeskPilotRecycleBinWin32 {
             if not normalized_extensions:
                 normalized_extensions = None
 
-        files = []
+        latest = None
         for root in roots:
             try:
-                for item in root.rglob("*"):
+                for item in self._iter_search_items(root, include_dirs=False):
                     try:
                         if not item.is_file():
                             continue
                         if normalized_extensions and item.suffix.lower() not in normalized_extensions:
                             continue
-                        files.append(item)
+                        mtime = item.stat().st_mtime
+                        if latest is None or mtime > latest[1]:
+                            latest = (item, mtime)
                     except (PermissionError, OSError):
                         continue
             except (PermissionError, OSError):
                 continue
 
-        if not files:
+        if latest is None:
             return None
-
-        latest = max(files, key=lambda path: path.stat().st_mtime)
+        path, mtime = latest
         return {
-            "name": latest.name,
+            "name": path.name,
             "type": "File",
-            "path": str(latest),
-            "modified": latest.stat().st_mtime,
+            "path": str(path),
+            "modified": mtime,
         }
 
     
     # FIND FILES BY MODIFICATION DATE
 
     def find_recent_files(self, location="computer", extension=None, days_ago=0, limit=20):
-        """Find files modified during a local calendar day."""
+        """Find files modified during a local calendar day without scanning system drives."""
         normalized_location = self.normalize_location(location)
         if normalized_location == "computer":
             roots = [p for p in self.search_roots if p.exists()]
@@ -881,31 +917,33 @@ public static class DeskPilotRecycleBinWin32 {
         if extension:
             raw = extension if isinstance(extension, (list, tuple, set)) else str(extension).replace(";", ",").split(",")
             extensions = {(str(x).strip().lower() if str(x).strip().startswith(".") else "." + str(x).strip().lower()) for x in raw if str(x).strip()}
-        skip_names = {
-            "windows", "program files", "program files (x86)", "programdata",
-            "$recycle.bin", "system volume information", "recovery",
-            "node_modules", ".git", "__pycache__", "appdata"
-        }
+        skip_names = {"windows", "program files", "program files (x86)", "programdata", "$recycle.bin", "system volume information", "appdata", "node_modules", ".git", "__pycache__", ".venv", "venv", "packages", "package cache", "microsoft"}
         results, seen = [], set()
+        cap = max(int(limit) * 5, 50)
         for root in roots:
             try:
                 for current, dirs, files in os.walk(root, topdown=True, onerror=lambda _e: None):
-                    # Avoid Windows/system caches and dependency trees that can
-                    # contain thousands of irrelevant files.
-                    dirs[:] = [
-                        d for d in dirs
-                        if d.casefold() not in skip_names and not d.startswith("$")
-                    ]
+                    dirs[:] = [d for d in dirs if d.casefold() not in skip_names and not d.startswith("$")]
                     for filename in files:
                         try:
                             path = Path(current) / filename
+                            if extensions and path.suffix.casefold() not in extensions:
+                                continue
                             key = str(path).casefold()
-                            if key in seen or (extensions and path.suffix.casefold() not in extensions): continue
+                            if key in seen:
+                                continue
                             stat = path.stat()
                             if start <= stat.st_mtime <= end:
-                                seen.add(key); results.append({"name": path.name, "type": "File", "path": str(path), "modified": stat.st_mtime})
-                        except (PermissionError, OSError): continue
-            except (PermissionError, OSError): continue
+                                seen.add(key)
+                                results.append({"name": path.name, "type": "File", "path": str(path), "modified": stat.st_mtime})
+                                if len(results) >= cap:
+                                    break
+                        except (PermissionError, OSError):
+                            continue
+                    if len(results) >= cap:
+                        break
+            except (PermissionError, OSError):
+                continue
         results.sort(key=lambda row: row["modified"], reverse=True)
         return results[:int(limit)]
 

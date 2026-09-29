@@ -1,41 +1,19 @@
-# DeskPilot
+## Preview
+<img width="1366" height="728" alt="image" src="https://github.com/user-attachments/assets/ff3c4206-f554-478e-a48f-6721ec1a36d7" />
 
-DeskPilot is a Windows desktop assistant for natural-language local computer
-automation.
 
-## Current capabilities
+## Added Windows controls
 
-- Open and close applications
-- Open files and folders using natural-language names
-- Search files and folders with fuzzy filename matching
-- Search by file extension
-- Find latest files and files modified today/yesterday
-- Show, minimize, maximize, restore, and switch visible windows
-- Open supported websites and search in the browser
-- Dedicated Recycle Bin open/count/empty/close support
-- Local system diagnostics for common development tools
-- Screenshot support using the existing Windows screenshot path
+- Show currently open windows
+- Minimize/maximize/restore/activate a specific window
+- Minimize all windows
+- Restore all windows
+- Take a full desktop screenshot
+- Open direct HTTP/HTTPS URLs
 
-## Safety
-
-- File deletion is intentionally **not** exposed as a DeskPilot tool.
-- The Recycle Bin implementation is kept separate from normal file search.
-- Do not commit or share the `.env` file. Keep your `GROQ_API_KEY` private.
-
-## Setup
-
-Install the Python dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Make sure `.env` contains your `GROQ_API_KEY`.
-
-Run:
-
-```bash
-python main.py
-```
-
-DeskPilot is intended to run on Windows.
+File deletion is intentionally not exposed as a DeskPilot tool to reduce accidental data loss.
+\n## Screenshot\n\nScreenshots use the Windows virtual desktop APIs directly and do not require Pillow.\nEOF
+rm -f /tmp/DeskPilot_screenshot_fixed_no_pillow.zip
+cd /tmp/dpfix && zip -qr /tmp/DeskPilot_screenshot_fixed_no_pillow.zip . -x '*.pyc' '*__pycache__*' '*.env'
+unzip -t /tmp/DeskPilot_screenshot_fixed_no_pillow.zip | tail -2
+ls -lh /tmp/DeskPilot_screenshot_fixed_no_pillow.zip

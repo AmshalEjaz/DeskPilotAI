@@ -1015,6 +1015,28 @@ Return JSON only.
         # folder. Search the computer when no location is given, and accept
         # arbitrary drive references such as "D drive".
         drive_location = r"[A-Za-z]:(?:\s*drive)?|[A-Za-z]\s+drive|drive\s*[A-Za-z]"
+        # "open the PDF named Amshal CV" should never be treated as the literal
+        # query "PDF named Amshal CV". Keep the extension as a hard constraint.
+        named_open = re.match(
+            r"^(?:open|launch|start|kholo)\s+(?:the\s+)?(?P<ext>pdf|txt|docx|xlsx|pptx|csv|jpg|jpeg|png|gif|webp|bmp|svg)\s+(?:file\s+)?(?:named|called)\s+(?P<query>.+?)(?:\s+from\s+(?:the\s+)?(?P<drive>" + drive_location + r")|\s+in\s+(?:the\s+)?(?P<folder>desktop|downloads?|documents?|pictures?|computer|pc))?\s*$",
+            compact, re.IGNORECASE,
+        )
+        if named_open:
+            location = named_open.group("drive") or named_open.group("folder") or "computer"
+            if named_open.group("drive"):
+                d = re.search(r"[A-Za-z]", named_open.group("drive"))
+                location = f"{d.group(0).upper()}:" if d else "computer"
+            return {
+                "tool": "find_item",
+                "args": {
+                    "query": named_open.group("query").strip(),
+                    "location": location,
+                    "item_type": "file",
+                    "extension": "." + named_open.group("ext").lower(),
+                    "open_result": True,
+                },
+            }
+
         open_file_pattern = rf"^(?:open|launch|start|kholo)\s+(?:the\s+)?(?P<query>.+?)(?:\s+file)?(?:\s+from\s+(?:the\s+)?(?P<drive>{drive_location})|\s+in\s+(?:the\s+)?(?P<folder>desktop|downloads?|documents?|pictures?|computer|pc))?\s*$"
         open_match = re.match(open_file_pattern, compact, re.IGNORECASE)
         if open_match and not re.search(r"\b(?:app|application|website|browser)\b", compact, re.IGNORECASE):
@@ -1097,36 +1119,12 @@ Return JSON only.
         search_words = r"find|search|look for|lookup|locate|look up|show me|show|get|dhundo|dhoondo|talash karo|search karo|find karo"
 
         # Modified-date queries are deterministic and do not require the LLM.
-        # Match the intent regardless of word order:
-        # "which PDF did I edit yesterday?",
-        # "show PDFs I modified yesterday",
-        # "kal maine kaunsi pdf edit ki thi?"
-        _recent_ext = r"(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|py|js|ts|php|jpg|jpeg|png)s?"
-        _recent_action = r"(?:edit\w*|modif\w*)"
-        _recent_day = r"(?:today|yesterday|last night|kal|aaj)"
-        _has_recent_file = re.search(r"\b" + _recent_ext + r"\b", compact, re.IGNORECASE)
-        _has_recent_action = re.search(_recent_action, compact, re.IGNORECASE)
-        _day_match = re.search(_recent_day, compact, re.IGNORECASE)
-
-        if _has_recent_file and _has_recent_action and _day_match:
+        _recent_ext = r"(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|py|js|ts|php|jpg|jpeg|png)"
+        _recent = re.search(r"(?:yesterday|last night|kal).*?(?:" + _recent_ext + r").*?(?:edited|modified)|(?:edited|modified).*?(?:yesterday|kal).*?(?:" + _recent_ext + r")", compact, re.IGNORECASE)
+        if _recent:
             _ext = re.search(r"\b(" + _recent_ext + r")\b", compact, re.IGNORECASE)
             ext = ("." + _ext.group(1).lower()) if _ext else None
-            if ext and ext.endswith("s") and ext[:-1] in {
-                ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-                ".txt", ".csv", ".zip", ".py", ".php", ".jpg", ".jpeg", ".png"
-            }:
-                ext = ext[:-1]
-            day_word = _day_match.group(0).lower()
-            days_ago = 0 if day_word in {"today", "aaj"} else 1
-            return {
-                "tool": "find_recent_files",
-                "args": {
-                    "location": "computer",
-                    "extension": ext,
-                    "days_ago": days_ago,
-                    "limit": 20,
-                },
-            }
+            return {"tool": "find_recent_files", "args": {"location": "computer", "extension": ext, "days_ago": 1, "limit": 20}}
 
         # Latest/newest image queries are deterministic. "image" is a file
         # category, not a literal filename, so route it to the latest-file

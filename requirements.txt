@@ -1,4 +1,4 @@
 PySide6
 python-dotenv
 groq
-playwright
+

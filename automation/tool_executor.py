@@ -579,6 +579,7 @@ class ToolExecutor:
                     query=query,
                     location=location,
                     item_type=item_type,
+                    requested_extension=args.get("extension"),
                 )
             )
 
