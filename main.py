@@ -921,13 +921,6 @@ class DeskPilotWindow(QMainWindow):
 
         
         # FILE EXPLORER → OPEN LOCATION
-        
-
-        # Examples:
-        #
-        # go to file explorer and search pictures folder
-        # open file explorer and open downloads folder
-        # go to file explorer and open documents
 
         match = re.match(
 
